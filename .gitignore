@@ -1,0 +1,22 @@
+# 프론트엔드
+node_modules/
+dist/
+*.local
+
+# Rust / Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# 에디터
+.vscode/
+.idea/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# rootfs 빌드 산출물 (수백 MB — 저장소에 넣지 않는다)
+dist-rootfs/
+*.tar
+*.tar.gz

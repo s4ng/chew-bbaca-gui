@@ -1,0 +1,23 @@
+# 줄바꿈은 저장소에서 LF 로 정규화하고, 체크아웃 시 파일 종류별로 되돌린다.
+#
+# 이 파일이 없으면 Windows 의 core.autocrlf=true 가 셸 스크립트까지 CRLF 로 바꿔
+# rootfs 이미지 안에서 `/etc/profile.d/chewie.sh` 가 깨진다 (bash 가 CR 을
+# 명령의 일부로 읽는다). 반대로 배치 파일은 CRLF 여야 한다.
+
+* text=auto eol=lf
+
+# Windows 에서 실행되는 것들 — CRLF 필수
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Linux 안에서 실행되는 것들 — LF 필수
+*.sh          text eol=lf
+Dockerfile    text eol=lf
+wsl.conf      text eol=lf
+
+# 바이너리 (줄바꿈 변환 금지)
+*.png binary
+*.ico binary
+*.trn binary
+*.gz  binary
