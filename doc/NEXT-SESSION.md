@@ -53,8 +53,9 @@
 - WSL2 는 설치되어 있고 사용자의 **`Ubuntu` 배포판이 존재한다. 절대 건드리지 말 것.**
 - `chewie-env` 배포판은 아직 없다 → 앱을 켜면 온보딩 ③(배포판 게이트)에서 멈춘다.
 - `%LOCALAPPDATA%\ChewieApp\` 은 스모크 테스트로 이미 생성되어 있다 (정상, 앱이 재사용한다).
-- **이 디렉터리는 아직 git 저장소가 아니다.** 다음 세션의 첫 작업으로 `git init` 을 제안할 것.
-  지금은 되돌릴 수단이 없다.
+- git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`). 원격은 아직 없다.
+  `.gitattributes` 가 `rootfs/*.sh` 를 LF 로 고정한다 — **이 설정을 풀면 Windows 체크아웃에서
+  CRLF 로 바뀌어 rootfs 이미지 안의 `/etc/profile.d/chewie.sh` 가 깨진다.**
 
 ---
 
