@@ -44,6 +44,43 @@ React (WebView2)  →  Rust / Tauri 2  →  ChewieRunner  →  WSL2 전용 배�
 
 ---
 
+## 설치하기 (앱을 받은 분)
+
+인스톨러 하나만 있으면 됩니다. **관리자 권한도, 인터넷도 필요 없습니다** —
+분석 엔진이 인스톨러 안에 함께 들어 있습니다 (그래서 파일이 510MB 입니다).
+
+### 1. 설치
+
+`chewBBACA Desktop_0.1.0_x64-setup.exe` 를 실행합니다.
+
+> **"Windows의 PC 보호" 경고가 뜹니다.** 코드 서명 인증서를 붙이지 않아서이며,
+> 파일에 문제가 있다는 뜻은 아닙니다.
+> **[추가 정보]** 를 누른 뒤 나타나는 **[실행]** 을 누르세요.
+
+설치 위치는 `%LOCALAPPDATA%\chewBBACA Desktop\` 이고 다른 프로그램에 영향을 주지 않습니다.
+
+### 2. 첫 실행
+
+처음 켜면 실행 환경을 준비하는 화면이 나옵니다. 대부분 **[설치]** 한 번이면 끝나고
+1분 이내에 완료됩니다. Windows 기능(WSL)이 없는 PC 라면 안내에 따라 한 번 재부팅해야
+할 수 있습니다.
+
+이미 다른 Linux 환경(WSL)을 쓰고 있어도 괜찮습니다. 이 앱은 `chewie-env` 라는
+전용 환경만 만들고 기존 것은 건드리지 않습니다.
+
+### 3. 무엇부터 해볼지
+
+앱 왼쪽 아래 **[따라해보기]** 를 누르면 공개 예제 데이터로 전 과정을 따라가는
+안내서가 열립니다. 용어 사전도 함께 들어 있습니다.
+
+### 지울 때
+
+설정 → 앱 및 기능에서 제거합니다. 제거 창의
+**[모든 데이터 삭제]** 를 체크하면 분석 환경과 만들어둔 스키마까지 함께 지워집니다.
+스키마를 남기고 싶으면 체크하지 마세요.
+
+---
+
 ## 개발 환경 준비
 
 ### 1. 필수 도구
@@ -138,26 +175,34 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 | 릴리스 | 범위 |
 | --- | --- |
-| **v0.1 (MVP)** | 온보딩/환경 구성, `CreateSchema`·`AlleleCall`, 실시간 로그·진행 표시·취소, 결과 내보내기 |
-| v0.2 | `ExtractCgMLST`·`RemoveGenes`·`JoinProfiles`, 리포트 내장 뷰어, 스키마 관리 강화 |
-| v0.3 | `DownloadSchema`, `PrepExternalSchema`, `UniprotFinder` 주석 |
+| **v0.1 (완료)** | 온보딩/환경 구성, `CreateSchema`·`AlleleCall`·`ExtractCgMLST`, 실시간 로그·진행 표시·취소, 스키마 내보내기, 따라해보기 가이드 |
+| v0.2 | `PrepExternalSchema`(외부 스키마 들여오기), 스키마 불러오기, `RemoveGenes`·`JoinProfiles`, 리포트 내장 뷰어 |
+| v0.3 | `SchemaEvaluator`·`AlleleCallEvaluator`, `DownloadSchema`, `UniprotFinder` 주석 |
+
+`ExtractCgMLST` 는 v0.2 예정이었으나 앞당겼다. 그것이 없으면 AlleleCall 의
+`--gl` 칸을 채울 방법이 앱 안에 없어 워크플로가 닫히지 않는다.
 
 **범위 제외:** macOS/Linux 지원, Docker 실행, 클러스터/HPC 연동, Chewie-NS 쓰기 계열 기능.
 
 ---
 
-## 검증되지 않은 가정
+## 검증 상태
 
-아키텍처가 의존하지만 아직 실측되지 않은 항목이다. GUI 완성보다 먼저 확인해야 한다.
+2026-08-10 에 튜토리얼 데이터(*S. agalactiae* 완성 게놈 32개)로 설치부터 제거까지
+전 경로를 실행해 확인했다. 측정값은 [`doc/NEXT-SESSION.md`](doc/NEXT-SESSION.md) 에 있다.
 
-- [ ] `/mnt/c` vs ext4 실행 시간 차이
-- [ ] `wsl --import` / `--unregister` 라이프사이클
-- [ ] Rust 프로세스 실행 + stdout 스트리밍 + 그룹 종료
-- [ ] 한글/공백 경로 처리
-- [ ] rootfs 빌드 스크립트 및 CI 파이프라인
-- [ ] 실제 데이터셋으로 CreateSchema → AlleleCall 완주
-- [ ] 진행률 파싱 규칙 (현재는 휴리스틱 — 실측 로그로 교정 필요)
+- [x] `wsl --import` / `--unregister` 라이프사이클 — import 8초
+- [x] Rust 프로세스 실행 + stdout 스트리밍 + 그룹 종료 — 취소 시 잔존 프로세스 0
+- [x] 한글/공백/괄호 경로 처리
+- [x] rootfs 빌드 스크립트 — 503MB 이미지 생성, 인스톨러 동봉
+- [x] 실제 데이터셋으로 CreateSchema → AlleleCall → ExtractCgMLST 완주
+      — cgMLST(0.95) 1,270 loci, 예제 정답 1,267 과 일치
+- [x] 진행률 파싱 — 실측 로그로 교정, 테스트가 그 로그를 재생한다
+- [x] 앱을 닫아도 작업이 계속되고 다시 켜면 이어받는지
+- [x] 인스톨러 설치 → 온보딩 → 제거 시 배포판·데이터 정리
+- [ ] `/mnt/c` vs ext4 실행 시간 차이 — 구조의 전제이지만 아직 재보지 않았다
 - [ ] perUser 인스톨러에서 권한 상승 헬퍼로 `wsl --install` 기동
+      — 개발 PC 에 WSL 이 이미 있어 이 경로를 밟지 못했다
 - [ ] 가상화 비활성화 기기에서 하드웨어 게이트가 재부팅 이전에 차단하는지
 
 ---
