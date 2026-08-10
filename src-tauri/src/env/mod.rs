@@ -12,4 +12,4 @@ pub mod probe;
 pub mod provision;
 
 pub use probe::{probe, EnvReport};
-pub use provision::{DownloadProgress, Provisioner, RootfsSource};
+pub use provision::{DownloadProgress, Provisioner, RootfsOrigin, RootfsSource};

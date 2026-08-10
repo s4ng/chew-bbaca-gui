@@ -158,13 +158,13 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       </div>
 
       <div className="card">
-        <h2>rootfs 배포 정보</h2>
+        <h2>rootfs 이미지</h2>
         <p style={{ color: "var(--text-dim)" }}>
-          첫 실행 시 내려받는 이미지의 위치와 체크섬입니다. 정식 릴리스에서는 앱에 기본값이
-          들어 있으며, 직접 빌드한 rootfs 를 쓸 때만 바꾸면 됩니다.
+          chewBBACA 이미지는 <strong>앱에 포함되어 배포</strong>됩니다. 아래 칸은 비워 두는 것이
+          정상이고, 직접 빌드한 rootfs 로 바꿔 쓸 때만 채우면 됩니다.
         </p>
         <div className="field">
-          <label htmlFor="url">URL</label>
+          <label htmlFor="url">파일 경로 또는 URL (비우면 포함된 이미지 사용)</label>
           <input
             id="url"
             type="text"
@@ -174,6 +174,11 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             }
             onBlur={() => void save(settings)}
           />
+          <div className="hint">
+            로컬 tar.gz 경로를 넣으면 그 파일을 그대로 검증해 등록하고, http(s) 주소를 넣으면
+            내려받습니다 (예: C:\…\dist-rootfs\chewie-rootfs-3.5.4.tar.gz). 값을 넣으면
+            앱에 포함된 이미지 대신 이쪽을 씁니다 — 체크섬도 함께 바꿔야 합니다.
+          </div>
         </div>
         <div className="field">
           <label htmlFor="sha">SHA256</label>

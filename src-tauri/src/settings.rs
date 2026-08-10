@@ -30,11 +30,13 @@ impl Default for Settings {
         Self {
             distro: "chewie-env".into(),
             rootfs: RootfsSource {
-                // TODO(release): 첫 릴리스 태그가 정해지면 실제 URL·체크섬으로 교체한다.
-                // 값이 비어 있으면 온보딩 ③ 단계에서 다운로드를 시작하지 않고
-                // "배포 준비 중" 안내를 띄운다.
+                // 비어 있는 것이 정상이다. rootfs 는 인스톨러에 동봉되므로 받을 곳이 없다
+                // (`tauri.bundle.json` → `provision.rs::bundled_rootfs`).
+                // 직접 빌드한 이미지를 시험할 때만 로컬 경로나 http 주소를 채운다.
                 url: String::new(),
-                sha256: String::new(),
+                // 2026-08-09 `rootfs/build.sh 3.5.4` 산출물의 체크섬.
+                // rootfs 를 다시 빌드하면 (`docker build` 재현성이 없으므로) 반드시 바뀐다.
+                sha256: "9d1cb6e03626a646b5555895d10289b7fb6948eebaeb0d18b601b9de8dad10d8".into(),
                 file_name: "chewie-rootfs-3.5.4.tar.gz".into(),
                 version: "3.5.4".into(),
             },
@@ -58,9 +60,10 @@ impl Settings {
         Ok(())
     }
 
-    /// rootfs 배포 정보가 채워져 있는지. 비어 있으면 자동 설치를 시도하지 않는다.
-    pub fn rootfs_ready(&self) -> bool {
-        !self.rootfs.url.is_empty() && self.rootfs.sha256.len() == 64
+    /// 체크섬이 형식상 쓸 수 있는 값인지. **어디서 가져오는지는 여기서 모른다** —
+    /// 동봉본 존재 여부는 `Provisioner::rootfs_origin()` 이 판단한다.
+    pub fn checksum_looks_valid(&self) -> bool {
+        self.rootfs.sha256.len() == 64 && self.rootfs.sha256.chars().all(|c| c.is_ascii_hexdigit())
     }
 }
 
@@ -69,8 +72,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_are_not_installable_until_release_metadata_is_filled() {
-        assert!(!Settings::default().rootfs_ready());
+    fn default_url_is_empty_so_the_bundled_image_is_used() {
+        // URL 이 채워져 있으면 동봉본을 무시하게 된다 — 기본값은 비어 있어야 한다.
+        assert!(Settings::default().rootfs.url.is_empty());
+    }
+
+    #[test]
+    fn default_checksum_is_a_full_sha256() {
+        assert!(Settings::default().checksum_looks_valid());
+    }
+
+    #[test]
+    fn a_truncated_checksum_is_rejected() {
+        let mut s = Settings::default();
+        s.rootfs.sha256 = "9d1cb6e0".into();
+        assert!(!s.checksum_looks_valid());
     }
 
     #[test]

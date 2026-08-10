@@ -4,7 +4,10 @@
 #   ./rootfs/build.sh [버전]
 #
 # 산출물: dist-rootfs/chewie-rootfs-<버전>.tar.gz 와 .sha256
-# 이 두 파일을 GitHub Releases 에 올리고, SHA256 을 앱 설정의 rootfs 항목에 넣는다.
+#
+# 이 tar.gz 는 인스톨러에 그대로 동봉된다 (`src-tauri/tauri.bundle.json` → §8.1).
+# 경로·파일명이 그 설정과 일치해야 하고, 다시 빌드하면 체크섬이 반드시 바뀌므로
+# `src-tauri/src/settings.rs` 의 기본 SHA256 도 함께 갱신해야 한다.
 #
 # Docker 는 여기서만 쓴다. 사용자 PC 에는 필요 없다.
 
@@ -39,5 +42,6 @@ echo
 echo "SHA256:"
 cat "$TARBALL.sha256"
 echo
-echo "이 값을 앱 [설정] → rootfs 배포 정보에 넣거나,"
-echo "src-tauri/src/settings.rs 의 기본값을 갱신하세요."
+echo "이 값을 src-tauri/src/settings.rs 의 기본 sha256 에 넣어야"
+echo "npm run tauri:build 로 만든 인스톨러가 동봉본 검증을 통과합니다."
+echo "(임시 확인은 앱 [설정] → rootfs 이미지 칸에 위 경로를 넣어도 됩니다)"

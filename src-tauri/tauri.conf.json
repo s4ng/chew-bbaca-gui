@@ -37,7 +37,13 @@
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Korean", "English"]
+        "languages": ["Korean", "English"],
+        "compression": "none",
+        "installerHooks": "./nsis/hooks.nsh",
+        "customLanguageFiles": {
+          "Korean": "./nsis/Korean.nsh",
+          "English": "./nsis/English.nsh"
+        }
       }
     },
     "shortDescription": "chewBBACA cg/wgMLST GUI",
