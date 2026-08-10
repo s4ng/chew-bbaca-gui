@@ -19,7 +19,8 @@ npm install                    # 최초 1회
 npm run tauri:dev              # 개발 실행
 npm run typecheck              # 프론트 타입 검사 (tsc --noEmit)
 npm run build                  # 타입 검사 + 프론트 번들
-npm run tauri:build            # NSIS 인스톨러 (perUser)
+npm run tauri:build            # NSIS 인스톨러 (perUser). dist-rootfs/ 의 tar.gz 를 동봉한다
+npm run tauri:build:slim       # rootfs 없이 GUI 만 (동봉 파일이 없을 때)
 cargo test --manifest-path src-tauri/Cargo.toml
 node scripts/generate-icons.mjs   # 아이콘 재생성
 ./rootfs/build.sh 3.5.4           # rootfs 이미지 (Linux/WSL 에서)
@@ -46,6 +47,12 @@ macOS 확장 시 통째로 교체될 화면이다.
 - `.wslconfig` 는 전역 설정이다. 읽지도 쓰지도 않는다. 메모리 제한이 필요하면 안내만 한다.
 - `wsl --install` 에서 `--no-distribution` 을 빼지 마라. 빼면 Ubuntu 가 함께 설치된다.
 - 앱이 소유하는 것은 `chewie-env` 배포판과 `%LOCALAPPDATA%\ChewieApp` 뿐이다.
+- 그 둘은 **제거할 때 정리해야 하는 것이기도 하다.** `nsis/hooks.nsh` 의 언인스톨 훅이
+  체크박스가 켜졌을 때만 배포판을 unregister 하고 폴더를 지운다. 훅에서 지우는 경로를
+  늘리려면 그 경로가 정말 앱 소유인지부터 확인한다.
+- 훅을 고쳤으면 **정의되었는지를 따로 확인한다.** `installer.nsi` 는 `!ifmacrodef` 로
+  감싸 호출하므로, 매크로 이름을 틀리면 빌드는 멀쩡히 성공하고 훅만 조용히 안 돈다.
+  작은 `.nsi` 에 `!include` 후 `!ifmacrodef` → `!warning` 으로 확인하면 몇 초면 된다.
 
 ### 3. 파일시스템 규칙
 
@@ -65,6 +72,10 @@ loci FASTA 수천 개를 쓴다.
 남으면 사용자 시스템이 마비된다.
 
 - 실행은 `setsid --wait` 로 새 프로세스 그룹에서 한다.
+- **chewBBACA 의 출력은 앱의 파이프가 아니라 작업 디렉터리의 `run.log` 로 보낸다.**
+  파이프로 직접 받으면 앱이 닫히는 순간 파이프가 닫히고 SIGPIPE 로 작업이 죽는다 —
+  `setsid` 로 그룹을 분리해도 소용없다(실측). 앱은 `tail --pid` 로 중계만 받는다.
+  앱이 죽으면 죽는 것은 `tail` 뿐이고 작업은 계속된다.
 - PGID 는 stdout 표식(`__CHEWIE_PGID__`)으로 즉시 올려보내고 **받자마자 SQLite 에 기록**한다.
 - 취소는 실행 중인 `wsl.exe` 를 죽이는 것이 아니라, 별도 프로세스로
   `kill -TERM -{PGID}` → (유예) → `kill -KILL -{PGID}` 를 보낸다.
@@ -77,6 +88,7 @@ loci FASTA 수천 개를 쓴다.
 | --- | --- | --- |
 | `CREATE_NO_WINDOW` (0x08000000) | 프로세스 생성 플래그 | 검은 콘솔 창이 반복해서 깜빡인다 |
 | `WSL_UTF8=1` | 환경변수 | `wsl --status` 등이 UTF-16LE 를 뱉어 파싱이 깨진다 |
+| `-e` (`--` 아님) | `wsl.exe` 인자 | 기본 셸이 재파싱해 인용부호를 먹는다 → **조용히 아무것도 안 한다** |
 | `PYTHONUNBUFFERED=1` | WSL 내부 export | 출력이 버퍼링되어 실시간 진행률이 죽는다 |
 | `--cpu` | WSL 내부 `nproc` | Windows 논리 코어 수와 다를 수 있다 |
 
@@ -115,12 +127,17 @@ wsl -d chewie-env -- true
 - `src/lib/types.ts` 는 Rust serde 표현과 1:1 이다. Rust 구조체를 고치면 **반드시 같이**
   고친다. 어긋나면 런타임에 `undefined` 로 조용히 흐른다.
 - 컴포넌트에서 `invoke()` 를 직접 부르지 않는다. `src/lib/ipc.ts` 만 통한다.
+- rootfs 파일명은 **네 곳에 흩어져 있다** — `rootfs/build.sh`, `src-tauri/tauri.bundle.json`,
+  `settings.rs` 의 `file_name`, 그리고 같은 파일의 `sha256`. 하나만 고치면 인스톨러는
+  정상 생성되고 사용자 기기에서 "찾을 수 없음" 또는 체크섬 불일치로 처음 실행할 때 깨진다.
 - 되돌릴 수 없는 조작(배포판 제거, 스키마 삭제, 재부팅)은 UI 에서 확인을 받은 뒤 호출한다.
 
 ## 현재 미완성
 
-- rootfs 배포 URL/체크섬이 비어 있다 (`settings.rs` 의 `TODO(release)`).
-  값이 없으면 온보딩 ③ 은 자동 다운로드 대신 안내만 띄운다.
+- **개발 실행(`tauri:dev`)에는 동봉 rootfs 가 없다.** Tauri 는 리소스를 번들 단계에서만
+  복사하므로 `rootfs_origin()` 이 `missing` 을 돌려주고 온보딩 ③ 의 설치 버튼이 사라진다.
+  정상이다. 설정의 [rootfs 이미지] 칸에 `dist-rootfs/chewie-rootfs-3.5.4.tar.gz` 절대
+  경로를 넣으면 그 파일을 검증해 등록한다.
 - 진행률 파싱(`runner/progress.rs`)은 휴리스틱이다. 실제 로그로 교정해야 한다.
 - v0.2 범위(ExtractCgMLST, 리포트 내장 뷰어, 결과 뷰어 모드)는 미착수.
 - 복구한 고아 작업은 stdout 을 재연결할 수 없어 완료 여부만 폴링한다.

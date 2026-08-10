@@ -2,11 +2,11 @@
 
 **대상 플랫폼:** Windows 10/11 (x86_64)
 **백엔드 실행 환경:** WSL2 전용 배포판 (`chewie-env`)
-**문서 상태:** 초기 설계 (구현 전)
-**최종 수정:** 2026-08-09
+**문서 상태:** v0.1 구현 완료, 튜토리얼 데이터로 전 과정 검증
+**최종 수정:** 2026-08-10
 
 이 문서는 시스템의 구조 — 계층, 컴포넌트 경계, 데이터 흐름, 수명주기 — 를 기술한다.
-배경과 의사결정 과정은 [`doc/chew-bbaca-gui-handoff.md`](doc/chew-bbaca-gui-handoff.md)를 참조한다.
+현재 진행 상황과 다음 작업은 [`doc/NEXT-SESSION.md`](doc/NEXT-SESSION.md) 에 있다.
 
 ---
 
@@ -140,7 +140,7 @@ trait ChewieRunner {
 ### 4.3 Environment Provisioner
 
 `chewie-env` 배포판의 설치·검증·제거·업데이트를 담당한다(§7, §8.2).
-rootfs 다운로드, SHA256 검증, `wsl --import`, 디스크 정리를 수행한다.
+rootfs 확보(동봉본/로컬/원격 — §8.1), SHA256 검증, `wsl --import`, 디스크 정리를 수행한다.
 
 ### 4.4 Schema Store
 
@@ -212,7 +212,7 @@ chewBBACA는 수백 개 FASTA를 읽고 loci FASTA 수천 개를 쓰므로 이 �
 ├── wsl\ext4.vhdx          # chewie-env 배포판 실체
 ├── app.db                 # SQLite
 ├── logs\{job_id}.log      # 작업 로그 (DB에는 경로만 저장)
-└── cache\rootfs-*.tar.gz  # 다운로드 캐시
+└── cache\rootfs-*.tar.gz  # 원격 rootfs 를 쓸 때만 생기는 다운로드 캐시 (§8.1)
 ```
 
 `%LOCALAPPDATA%`를 사용한다. `C:\ProgramData`·`Program Files`는 관리자 권한이 필요해
@@ -322,7 +322,9 @@ WSL 설치를 인스톨러 단계로 옮기는 방안(Docker Desktop 방식)을 
 | 실제 단계 수 | 설치 → 재부팅 → 첫 실행 → rootfs | 설치 → 첫 실행 → 재부팅 → rootfs |
 
 핵심은 **단계 수가 줄지 않는다**는 점이다. WSL 기능 활성화는 어차피 재부팅을 요구하므로
-인스톨러로 옮겨도 재부팅과 rootfs 다운로드는 그대로 남는다. 반면 실패를 안내할 UI는 잃는다.
+인스톨러로 옮겨도 재부팅과 `wsl --import`는 그대로 남는다. 반면 실패를 안내할 UI는 잃는다.
+rootfs **파일**은 인스톨러에 담지만(§8.1), 배포판 **등록**은 앱이 한다 — 담는 것과
+실행하는 것은 별개다.
 
 ### 7.2 Docker Desktop 방식을 따르지 않는 이유
 
@@ -377,7 +379,7 @@ wsl -d chewie-env -- true                    ◀── 낙관적 시도
             └─ 정상
                  │
                  ▼
-  ③ 배포판 게이트     rootfs 다운로드 → SHA256 검증 → wsl --import
+  ③ 배포판 게이트     rootfs 확보(동봉본) → SHA256 검증 → wsl --import
                  │
                  └──────────────────────────────▶ 앱 진입
 ```
@@ -465,11 +467,42 @@ BIOS에 관리자 암호가 걸린 회사 장비 등 끝내 불가능한 사용�
 
 | 산출물 | 크기 | 배포 시점 |
 | --- | --- | --- |
-| 인스톨러 (NSIS/MSI) | 수십 MB | 설치 시 |
-| rootfs tar.gz + SHA256 | 400~800MB | **첫 실행 시 다운로드** |
+| 인스톨러 (NSIS) — GUI + rootfs 동봉 | ~520MB | 설치 시 |
 
-인스톨러에는 GUI만 포함한다. rootfs를 분리해 인스톨러를 가볍게 유지하는 대신,
-**다운로드 진행률·재시도·체크섬 검증** 로직이 필요하다. 호스팅은 GitHub Releases.
+**rootfs를 인스톨러에 함께 담는다.** 배포 대상이 지인 소수이고 전달 수단이 zip이라
+호스팅을 두는 편익이 없다. 대신 다음을 얻는다.
+
+- 첫 실행에 인터넷이 필요 없다 — 온보딩 ③에서 네트워크 실패 경로가 사라진다.
+- 앱 버전과 rootfs 버전이 **구조적으로** 어긋날 수 없다.
+- URL 만료·호스팅 중단으로 과거 빌드가 죽는 일이 없다.
+
+대가는 인스톨러 크기와, 설치 후에도 tar.gz가 설치 폴더에 남는다는 점이다
+(언인스톨러가 추적하는 파일이라 앱이 임의로 지우지 않는다).
+
+동봉 방식은 Tauri 리소스다. `dist-rootfs/`가 없는 상태에서도 개발이 되어야 하므로
+**리소스 선언은 기본 설정이 아니라 오버레이 설정에 둔다.**
+
+```
+src-tauri/tauri.conf.json    ← GUI 만. tauri dev / tauri:build:slim 이 쓴다
+src-tauri/tauri.bundle.json  ← resources 매핑만. npm run tauri:build 가 --config 로 덧씌운다
+  "../dist-rootfs/chewie-rootfs-3.5.4.tar.gz" → "$RESOURCE/rootfs/chewie-rootfs-3.5.4.tar.gz"
+```
+
+NSIS 압축은 `none`이다. tar.gz는 이미 압축되어 있어 LZMA를 한 번 더 돌려도
+크기는 거의 그대로인데 빌드 시간만 수십 분 늘어난다.
+
+런타임 해석은 `Provisioner::rootfs_origin()` 하나로 모인다.
+
+| origin | 조건 | 동작 |
+| --- | --- | --- |
+| `bundled` | 설정 URL 이 비어 있고 리소스에 파일이 있음 | 제자리 해싱 → import (기본 경로) |
+| `localFile` | 설정 URL 이 로컬 경로 | 제자리 해싱 → import |
+| `remote` | 설정 URL 이 http(s) | 다운로드 → 검증 → import |
+| `missing` | 둘 다 없음 (개발 실행) | 설치 버튼을 숨기고 안내 |
+
+설정의 URL이 동봉본을 **이긴다.** 동봉본을 두고 URL을 채우는 유일한 이유가
+"다른 이미지를 시험하려는 것"이기 때문이다. 원격 경로 코드는 남겨 둔다 —
+사설망 배포나 rootfs만 따로 갱신해야 할 때 되살아난다.
 
 **인스톨러는 현재 사용자(perUser) 모드로 동작하며 관리자 권한을 요구하지 않는다.**
 WSL 설치·Windows 기능 활성화는 인스톨러가 아니라 앱 온보딩의 권한 상승 헬퍼가 수행한다(§7.1).
@@ -497,7 +530,12 @@ docker rm tmp
 이미지 요구사항:
 - `/etc/wsl.conf`에 기본 사용자와 `[interop]` 설정 포함
 - micromamba 환경이 non-login shell에서도 활성화되도록 `.bashrc` 또는 wrapper 스크립트 준비
-- SHA256 체크섬을 함께 배포
+- SHA256 체크섬을 `settings.rs`의 기본값에 반영 (동봉본도 매번 검증한다)
+
+`build.sh`는 산출물을 `dist-rootfs/`에 둔다. **인스톨러가 집어가는 위치가 그곳이므로
+경로와 파일명을 바꾸면 `tauri.bundle.json`도 함께 고쳐야 한다.** rootfs를 다시 빌드하면
+`docker build`에 재현성이 없어 체크섬이 반드시 바뀌므로, `settings.rs`의 기본 체크섬을
+갱신하지 않으면 온보딩 ③이 검증 단계에서 실패한다.
 
 ### 8.3 배포판 수명주기
 
@@ -509,6 +547,36 @@ docker rm tmp
 
 전용 배포판을 별도 등록하는 이유: 사용자 기존 환경과의 버전 충돌 원천 차단,
 그리고 **언인스톨이 한 줄로 완결된다는 점** — 이것이 가장 크다.
+
+#### 언인스톨러가 지우는 것
+
+설치 위치는 `%LOCALAPPDATA%\chewBBACA Desktop\` 이고 (perUser), 그 안에
+`chewie-app.exe`·`rootfs\*.tar.gz`·`uninstall.exe` 가 들어간다. 제거 시 이 셋과
+바로가기·HKCU 레지스트리 키가 사라진다.
+
+문제는 **앱이 만드는 것들**이다. `%LOCALAPPDATA%\ChewieApp\`(§5.3)과 등록된
+`chewie-env` 배포판은 인스톨러가 모르는 존재다. NSIS 의 "앱 데이터 삭제" 체크박스는
+BUNDLEID 경로(`io.github.chewbbaca.desktop` — 실제로는 WebView2 프로필뿐)만 지우므로,
+그대로 두면 사용자가 체크하고도 수 GB 짜리 `ext4.vhdx` 와 배포판 등록이 남는다.
+
+그래서 `src-tauri/nsis/hooks.nsh` 의 `NSIS_HOOK_POSTUNINSTALL` 이 체크박스가 켜졌을 때만
+`wsl --unregister chewie-env` → `RMDir /r %LOCALAPPDATA%\ChewieApp` 을 수행한다.
+
+- **`PRE` 가 아니라 `POST` 다.** `PREUNINSTALL` 은 `CheckIfAppIsRunning` 앞에서 돌아,
+  앱이 아직 떠 있고 작업이 실행 중인 상태에서 배포판을 날릴 수 있다.
+- **순서를 뒤집으면 안 된다.** 폴더를 먼저 지우면 vhdx 를 잃은 배포판 등록만 남는다.
+- **업데이트(`/UPDATE`)에서는 타지 않는다.** 버전만 올리려다 스키마가 날아간다.
+- 32비트 NSIS 에서 `$WINDIR\System32` 는 SysWOW64 로 리다이렉트되어 `wsl.exe` 를 찾지
+  못한다. `${DisableX64FSRedirection}` 이 필수다.
+- 체크박스 문구는 `nsis/Korean.nsh`·`English.nsh` 로 교체했다. 기본 문구
+  "애플리케이션 데이터 삭제하기"는 몇 시간짜리 스키마가 함께 사라진다는 사실을 숨긴다.
+
+**`.nsh` 파일의 BOM 규칙이 파일마다 반대다.** `hooks.nsh` 는 원본 경로에서 그대로
+`!include` 되므로 UTF-8 BOM 이 **있어야** makensis 가 한글을 UTF-8 로 읽는다(없으면 ACP=CP949
+로 오독). 반면 언어 파일은 Tauri 가 `target\release\nsis\x64\` 로 복사하며 BOM 을 스스로
+붙이므로 원본에 BOM 이 **있으면 안 된다** — 두 번 들어가 `Invalid command: ";"` 로 죽는다.
+
+체크박스를 끄면 예전처럼 남는다 — 재설치 후 스키마를 이어 쓰려는 사용자의 경로다.
 
 ### 8.4 코드 서명
 

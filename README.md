@@ -26,8 +26,8 @@ React (WebView2)  →  Rust / Tauri 2  →  ChewieRunner  →  WSL2 전용 배�
 | **모든 I/O 를 ext4 에서** | `/mnt/c` 는 9p 경유라 ext4 대비 5~20배 느리다. 입력을 WSL 내부로 복사한 뒤 실행한다. |
 | **상태는 SQLite 에** | 40분 넘게 도는 작업이 있다. 앱을 닫아도 작업은 계속 돌고, 다시 켜면 조정(reconciliation)한다. |
 
-설계의 전문은 [`ARCHITECTURE.md`](ARCHITECTURE.md), 배경과 의사결정 과정은
-[`doc/chew-bbaca-gui-handoff.md`](doc/chew-bbaca-gui-handoff.md) 에 있다.
+설계의 전문은 [`ARCHITECTURE.md`](ARCHITECTURE.md), 진행 상황과 다음 작업은
+[`doc/NEXT-SESSION.md`](doc/NEXT-SESSION.md) 에 있다.
 
 ---
 

@@ -16,25 +16,62 @@
 | --- | --- | --- |
 | 프론트 타입 | `npm run typecheck` | 통과 |
 | 프론트 번들 | `npx vite build` | 통과 (171KB / gzip 56KB) |
-| Rust 빌드 | `cargo build --manifest-path src-tauri/Cargo.toml` | 통과 (경고 6, 전부 dead-code) |
-| Rust 테스트 | `cargo test --manifest-path src-tauri/Cargo.toml` | **23/23 통과** |
+| Rust 빌드 | `cargo build --manifest-path src-tauri/Cargo.toml` | 통과 (경고 7, 전부 dead-code) |
+| Rust 테스트 | `cargo test --manifest-path src-tauri/Cargo.toml` | **30/30 통과** |
 | 앱 기동 | `npm run tauri:dev` | 창 생성 확인 (`MainWindowTitle: chewBBACA Desktop`) |
 | DB 초기화 | — | `%LOCALAPPDATA%\ChewieApp\app.db` 에 `jobs`/`schemas`/`settings` 생성 확인 (WAL) |
+| rootfs 빌드 | `./rootfs/build.sh 3.5.4` | `dist-rootfs/` 에 503MB tar.gz + sha256 (2026-08-10) |
+| 인스톨러 | `npm run tauri:build` | 509.7MB NSIS 생성. rootfs 502.7MB 가 그대로 들어 있다 |
+| 배포판 등록 | `wsl --import chewie-env ...` | **8초**. `chewie-env` 등록됨 (2026-08-10) |
+| micromamba 활성화 | `wsl -d chewie-env -- bash -lc 'chewBBACA.py --version'` | `chewBBACA version: 3.5.4` |
+| PGID 회수 | `runner/wsl.rs` 의 스크립트를 그대로 실행 | `__CHEWIE_PGID__ 20`, 자식 2개 모두 PGID 20 |
+| 취소 | 같은 PGID 에 `kill -TERM -20` | 잔존 프로세스 **0**, 러너 프로세스 exit 143(SIGTERM) |
+| 경로 변환 | `wslpath -a 'C:\...\한글 경로 (괄호)'` | 한글·공백·괄호 모두 통과 |
+| **CreateSchema 완주** | `chewBBACA.py CreateSchema --cds` | 2초, **20 loci** 생성. `schema_seed/` 구조 확인 |
+| **AlleleCall 완주** | `chewBBACA.py AlleleCall --cds` | 2초, EXC 20 / INF 60. `results_alleles.tsv` 생성 |
+| 진행률 파싱 | `runner/progress.rs` | 위 두 로그로 **교정 완료**. 테스트가 실측 로그를 재생한다 |
+
+> 완주는 **합성 CDS 입력**(게놈 4개 × 유전자 20개, `--cds` 로 Prodigal 우회)으로 했다.
+> 단계 이름과 순서를 얻는 데는 충분하지만, 단계별 **비중**은 실제 어셈블리로 다시 봐야 한다.
+> 진짜 데이터에서는 BLASTp 두 구간이 지금 배분보다 훨씬 무거울 것이다.
+
+> **빌드는 반드시 PowerShell 에서 돌린다.** Git Bash 의 PATH 는 `link` 를
+> `/usr/bin/link`(coreutils)로 잡아 MSVC 링커를 가린다. 증상이
+> `could not compile <crate> (build script)` 로만 나와 코드 문제로 오해하기 쉽다.
 
 ### 검증되지 **않은** 것 — 여기가 다음 세션의 본 게임
 
-**실제 chewBBACA 를 한 번도 돌려보지 않았다.** `WslRunner` 의 스크립트 조립·PGID 회수·
-스트리밍·스테이징은 전부 "컴파일되고 논리적으로 맞아 보이는" 상태이지 실측된 상태가 아니다.
-`chewie-env` 배포판이 아직 존재하지 않기 때문이다.
+**인스톨러를 아직 한 번도 설치해 보지 않았다.** 설치·제거 양쪽에 미검증 지점이 있다.
 
-구체적으로 다음이 미검증이다.
+- 설치 후 `resource_dir()\rootfs\chewie-rootfs-3.5.4.tar.gz` 를 실제로 찾아내는지
+  (`rootfs_origin()` 이 `bundled` 를 반환하는지). rootfs 가 인스톨러 안에 들어간 것은
+  크기로 확인했지만 런타임 경로 해석은 설치해 봐야 안다.
+- 제거 시 `nsis/hooks.nsh` 훅이 도는지 — **체크박스를 켠 경우** `wsl -l -v` 에서
+  `chewie-env` 가 사라지고 `%LOCALAPPDATA%\ChewieApp` 이 없어져야 한다.
+  **끈 경우** 둘 다 남아야 한다. 두 방향을 모두 확인한다.
+- 체크박스 문구가 교체된 한국어로 뜨는지 (기본 "애플리케이션 데이터 삭제하기" 가
+  아니어야 한다). 깨져 보이면 `nsis/*.nsh` 의 UTF-8 BOM 이 사라진 것이다.
 
-- `setsid --wait bash -c 'echo "__CHEWIE_PGID__ $$"; eval "$CHEWIE_CMD"'` 가
-  실제로 PGID 를 올바르게 내보내는지, `kill -TERM -{PGID}` 로 BLAST 까지 죽는지
-- `wslpath -a` 에 한글/공백/OneDrive 경로를 넘겼을 때의 실제 동작
-- `bash -lc` 에서 micromamba 활성화가 되어 `chewBBACA.py` 가 PATH 에 잡히는지
-- `/mnt/c` vs ext4 실행 시간 차이 (§5.2 의 전제 자체)
-- `runner/progress.rs` 의 단계 키워드가 실제 출력과 맞는지 (현재는 순수 추측)
+> **2026-08-10 오후: 앱을 거쳐 CreateSchema → AlleleCall 을 완주했다.** 아래 문단은
+> 그 이전 상태를 적은 것이고, 지금은 대부분 해소됐다 — §1 의 검증 표를 먼저 본다.
+> 튜토리얼 데이터(*S. agalactiae* 완성 게놈 32개)로 CreateSchema 3,127 loci 생성 →
+> AlleleCall 1분 43초(EXC 41,555 / INF 14,702 / LNF 42,347, 신규 allele 14,702개 추가)
+> → 결과 TSV 회수까지 확인. **남은 미검증은 조정(reconciliation) 실경로 하나뿐이다.**
+
+**chewBBACA 는 돌려봤지만 앱을 거쳐서 돌린 적은 없다.** 2026-08-10 에 배포판을 등록하고
+WSL 안에서 직접 CreateSchema/AlleleCall 을 완주시켰다(위 표). 덕분에 백엔드 쪽 불확실성은
+대부분 사라졌지만, **그 사이를 잇는 앱 코드는 여전히 한 번도 실행되지 않았다.**
+
+아직 미검증인 것.
+
+- **`JobManager` 전체 경로** — 폼 제출 → SQLite 기록 → 러너 호출 → 로그 파일 기록 →
+  Tauri 이벤트 → UI 갱신. 이 사슬은 아직 한 번도 이어진 적이 없다.
+- **스테이징과 회수** (`stage_input`, `collect_output`) — `/mnt/c` ↔ ext4 복사가 실제
+  Windows 경로로 동작하는지. 위 완주는 입력·출력이 모두 WSL 안에 있었다.
+- **스키마 등록** (`inspect_schema` → `db.insert_schema` → 스키마 화면). `schema_seed/`
+  구조와 loci 20개는 확인했으나 앱이 그것을 읽어 등록하는 경로는 미실행.
+- `/mnt/c` vs ext4 실행 시간 차이 (§5.2 의 전제 자체) — 아래 ②
+- 조정(reconciliation) 실경로 — 아래 ④
 
 ---
 
@@ -51,7 +88,12 @@
       --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --quiet --norestart
     ```
 - WSL2 는 설치되어 있고 사용자의 **`Ubuntu` 배포판이 존재한다. 절대 건드리지 말 것.**
-- `chewie-env` 배포판은 아직 없다 → 앱을 켜면 온보딩 ③(배포판 게이트)에서 멈춘다.
+- **`chewie-env` 배포판이 2026-08-10 에 등록되었다** (수동 `wsl --import`). 앱을 켜면
+  온보딩을 통과해 바로 진입한다. 지우려면 `wsl --unregister chewie-env`.
+  온보딩 ③ 을 다시 보려면 지운 뒤 켜면 된다 — 개발 실행에는 동봉 rootfs 가 없으므로
+  설치 버튼 대신 안내가 뜨는 것이 정상이다 (§3-① 참조).
+- 스모크 테스트 잔재가 배포판 안에 남아 있다: `/tmp/smoke/`(합성 입력·스키마·결과),
+  `/tmp/gen.py`, `/tmp/pgidtest.sh`. 지워도 무방하다.
 - `%LOCALAPPDATA%\ChewieApp\` 은 스모크 테스트로 이미 생성되어 있다 (정상, 앱이 재사용한다).
 - git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`). 원격은 아직 없다.
   `.gitattributes` 가 `rootfs/*.sh` 를 LF 로 고정한다 — **이 설정을 풀면 Windows 체크아웃에서
@@ -70,26 +112,43 @@
 ./rootfs/build.sh 3.5.4          # → dist-rootfs/chewie-rootfs-3.5.4.tar.gz + .sha256
 ```
 
-그다음 둘 중 하나로 등록한다.
+> **2026-08-10: 이미 빌드되어 있다.** `dist-rootfs/chewie-rootfs-3.5.4.tar.gz` (503MB,
+> sha256 `9d1cb6e0…`). 아래 빌드 명령은 이미지를 고칠 때만 다시 돌리면 된다.
 
-- **앱을 통해서:** 산출물을 어딘가에 올리고 `설정 → rootfs 배포 정보` 에 URL/SHA256 입력
-  → 온보딩 ③ 의 [내려받고 설치] 버튼. (다운로드 경로까지 함께 검증되므로 이쪽을 권장)
+그다음 셋 중 하나로 등록한다.
+
+- **인스톨러로:** `npm run tauri:build` → rootfs 가 동봉된 NSIS 설치. 설치 후 첫 실행에서
+  온보딩 ③ 의 [설치] 버튼. **실제 배포 경로와 같으므로 최종 확인은 반드시 이쪽으로 한다.**
+- **개발 실행에서:** `tauri:dev` 에는 동봉본이 없다. `설정 → rootfs 이미지` 칸에
+  `<저장소>\dist-rootfs\chewie-rootfs-3.5.4.tar.gz` 의 **절대 경로**를 넣으면
+  검증 후 등록한다. 반복 개발에는 이쪽이 빠르다.
 - **수동으로:** `wsl --import chewie-env "%LOCALAPPDATA%\ChewieApp\wsl" <tar.gz> --version 2`
-  (다운로드 경로는 건너뛰고 Runner 만 빨리 보고 싶을 때)
+  (등록 경로는 건너뛰고 Runner 만 빨리 보고 싶을 때)
 
-등록 후 확인 순서:
+등록 후 확인 순서 — **1·3 은 2026-08-10 에 CLI 로 확인했다. 남은 것은 앱을 거치는 2·4 다.**
 
-1. `wsl -d chewie-env -- bash -lc 'chewBBACA.py --version'` — micromamba 활성화 검증
-2. 앱에서 CreateSchema 를 작은 데이터셋으로 실행 → 로그가 **실시간으로** 흐르는지
-   (버퍼링되면 `PYTHONUNBUFFERED` 또는 `\r` 처리 문제다)
-3. 실행 중 [취소] → `wsl -d chewie-env -- ps aux | grep blast` 로 **잔존 프로세스 0 확인**
+1. ~~`bash -lc 'chewBBACA.py --version'` — micromamba 활성화~~ ✅ `3.5.4`
+2. **앱에서** CreateSchema 를 작은 데이터셋으로 실행 → 로그가 **실시간으로** 흐르는지
+   (버퍼링되면 `PYTHONUNBUFFERED` 또는 `\r` 처리 문제다). 여기서 처음으로
+   `stage_input`(Windows→ext4 복사)과 `collect_output`(회수)이 실행된다.
+3. ~~실행 중 [취소] → 잔존 프로세스 0~~ ✅ CLI 로 확인 (exit 143, 잔존 0).
+   다만 **앱의 [취소] 버튼**을 거치는 경로는 아직이다 — PGID 가 SQLite 에 실제로
+   기록되는지가 그 경로에서만 드러난다.
 4. 완료 후 `스키마` 화면에 등록되는지, `loci 수`/`.trn` 이 잡히는지
 
-**착수 지점:** `rootfs/Dockerfile`, `src-tauri/src/runner/wsl.rs` 의 `spawn_and_stream()`
+> 합성 데이터가 필요하면 배포판 안의 `/tmp/gen.py` 를 쓰면 된다 (`--cds` 입력 생성).
+> 실제 어셈블리로 해야 ②(성능 비교)와 진행률 비중 재조정이 의미 있다.
 
-> Dockerfile 은 아직 한 번도 `docker build` 되지 않았다. micromamba 이미지의
-> `MAMBA_ROOT_PREFIX` 기본값이 `/opt/conda` 가 맞는지부터 확인해야 한다
-> (`rootfs/profile.d-chewie.sh` 가 이 값을 가정하고 있다).
+**착수 지점:** `src-tauri/src/jobs.rs` 의 `run_job()` — 이제 러너가 아니라 그 위가 미검증이다.
+
+> **2026-08-10 해소됨.** 이미지를 빌드했고 tar 목록으로 다음을 확인했다 —
+> `opt/conda/bin/` 에 `chewBBACA.py`·`blastp`·`mafft`·`FastTree` 가, `usr/bin/` 에
+> `micromamba` 가, 그리고 `etc/wsl.conf`·`etc/profile.d/chewie.sh` 가 들어 있다.
+> `profile.d-chewie.sh` 가 가정한 `MAMBA_ROOT_PREFIX=/opt/conda` 는 맞다.
+> 프로필 활성화도 확인됐다 — `bash -lc 'chewBBACA.py --version'` → `3.5.4`.
+> 단, **`bash -lc` 를 거치지 않으면 안 된다.** `wsl -d chewie-env -- python3` 처럼
+> 직접 실행하면 `/opt/conda/bin` 이 PATH 에 없어 실패한다. `exec()` 로 부르는 것은
+> coreutils(`printenv`, `cp` 등)로 한정해야 한다.
 
 ### ② `/mnt/c` vs ext4 실측 (§5.2 의 전제)
 
@@ -97,27 +156,72 @@
 9p 오버헤드가 훨씬 크다" 는 가정 위에 서 있다. 만약 차이가 작다면 스테이징 단계
 (`WslRunner::stage_input`)를 선택적으로 만들 여지가 생긴다.
 
-### ③ 진행률 파싱 교정
+### ③ 진행률 파싱 교정 — ✅ 2026-08-10 완료
 
-①에서 얻은 **실제 로그 파일**(`%LOCALAPPDATA%\ChewieApp\logs\{job_id}.log`)을 근거로
-`src-tauri/src/runner/progress.rs` 의 `STAGES` 테이블을 고친다. 현재 키워드는 추측이며,
-테스트(`progress::tests`)도 그 추측 위에 세워져 있으므로 함께 갱신해야 한다.
+실측 로그로 `progress.rs` 를 다시 썼다. 바뀐 점:
+
+- 단계표가 **모듈별로 분리**되었다 (`ProgressParser::for_module`). 두 모듈이
+  `CDS deduplication` 같은 이름을 공유하지만 순서와 비중이 다르다.
+- 옛 키워드 5개 중 **3개는 로그에 존재하지도 않았다**
+  (`extracting cds`, `removing duplicated`, `reading the input files`).
+- 막대(`[====] 40%`)가 붙지 않는 단계가 많아, **단계 헤더만으로도 구간 시작까지 올린다.**
+- 테스트가 실측 로그 줄을 그대로 재생한다 (`CREATE_SCHEMA_LOG`, `ALLELE_CALL_LOG`).
+
+**남은 것은 비중이다.** 합성 데이터라 2초 만에 끝나서 단계별 실제 소요를 재지 못했다.
+실제 어셈블리로 한 번 돌려 BLASTp 두 구간의 몫을 다시 배분해야 한다.
 
 ### ④ 조정(reconciliation) 실경로 확인
 
 작업 실행 중 앱을 강제 종료 → 재실행 → "이전 작업이 실행 중입니다 [복구/종료]" 배너가
 뜨는지. `JobManager::reconcile()` 과 `watch_adopted()` 가 이 시나리오에서만 동작한다.
 
+> **2026-08-10 에 오탐 하나를 잡았다.** 프런트는 [작업] 화면을 열 때마다
+> `jobs_reconcile` 을 부르는데, 조정이 매번 다시 돌면서 **지금 이 프로세스가 실행 중인
+> 작업**을 고아로 오판했다. `mark_running` 직후에는 PGID 표식이 아직 도착하지 않아
+> `is_alive` 가 false 를 주기 때문이다. 결과적으로 정상 실행 중인 작업이 잠깐
+> "앱이 종료된 사이 프로세스가 사라졌고 결과도 없습니다" 로 표시됐다가, 실제 완료 시
+> 다시 `completed` 로 덮여 쓰였다. 이제 조정은 **프로세스당 한 번만** 돌고
+> 자기 작업은 건너뛴다.
+>
+> 아직 남은 문제 — `output_populated()` 는 `~/work/{job}/output` 만 본다. CreateSchema 는
+> 산출물이 `~/schemas/{id}` 로 가므로 **진짜 고아가 된 CreateSchema 는 성공했어도
+> 실패로 확정된다.** ④ 를 검증할 때 이것부터 고쳐야 한다.
+
 ### ⑤ 그다음 (v0.2 범위)
 
-- `ExtractCgMLST` 추가 — `models::Module` 에 variant 추가 → `runner/cli.rs::build_argv`
-  → `NewJobPage.tsx` 폼. 이 세 곳이 모듈 추가의 전부다.
+- ~~`ExtractCgMLST` 추가~~ ✅ **2026-08-10 구현 완료.** 다만 **앱에서 아직 실행해보지 않았다.**
+  이 모듈이 기존 두 개와 다른 점 세 가지가 다음 모듈 추가의 참고가 된다.
+  - 입력이 폴더가 아니라 **파일 하나**다 → `Module::takes_input_dir()` 로 갈라
+    `stage_file()` 이 그 파일만 ext4 로 복사한다. `submit()` 의 `input_dir` 검증도 조건부다.
+  - **`--cpu` 인자가 없다.** `build_argv` 가 무조건 붙이던 것을 모듈별로 바꿨다
+    (붙이면 argparse 가 즉시 실패한다).
+  - 진행률 막대가 없어 단계 표시가 거칠다. 실행이 짧아 문제되지 않는다.
+- 다음 모듈을 넣기 전에 `JobSpec` 정리를 검토한다. 지금은 모듈별 필드가 한 구조체에
+  쌓이는 중이다 (`profiles_file`, `thresholds` 가 이번에 추가됐다).
 - 리포트 내장 뷰어 (SchemaEvaluator HTML) 및 결과 뷰어 모드 (§4.5, §7.7)
-- 배포: NSIS 인스톨러 생성 확인(`npm run tauri:build`), GitHub Releases, 업데이터 서명 키
+- 배포: 인스톨러를 **다른 PC 에서** 설치해 첫 실행까지 확인. 지인 배포는 zip 전달이므로
+  SmartScreen 경고 안내(§8.4)를 README 에 넣어야 한다.
 
 ---
 
 ## 4. 손대기 전에 알아야 할 함정
+
+- **작업의 stdout 을 앱의 파이프로 직접 받으면 안 된다.** (2026-08-10 실측)
+  앱이 닫히면 파이프가 닫히고, 거기에 쓰던 chewBBACA 가 SIGPIPE 로 죽는다.
+  `setsid` 는 프로세스 그룹만 분리할 뿐 출력 대상까지 떼어주지는 않는다.
+  실측: `sleep`(출력 없음)은 살아남고, 1초마다 `echo` 하는 프로세스는 죽는다.
+  그래서 `spawn_and_stream()` 은 `run.log` 에 쓰게 하고 `tail -n +1 -f --pid=` 로
+  중계한다. `--pid` 를 빼고 직접 `kill` 하면 **마지막 몇 줄(요약 표, "Finished at")을
+  놓친다.**
+
+- **`wsl.exe` 에는 `-e` 를 쓴다. `--` 를 쓰면 안 된다.** (2026-08-10 에 실제로 물림)
+  `--` 는 명령줄을 배포판 기본 셸에 **한 번 더 파싱**시켜 인용부호를 먹는다. 그래서
+  `export CHEWIE_CMD='...'` 가 무력화되고 `eval` 이 빈 문자열을 돌린다 —
+  **에러 없이 exit 0 으로 끝나고 아무 일도 일어나지 않는다.** 앱에서 CreateSchema 를
+  돌렸는데 로그에 chewBBACA 출력이 한 줄도 없고 스키마도 안 생긴 것이 이 증상이었다.
+  `runner/wsl.rs::login_shell_argv()` 로 한곳에 모았고 회귀 테스트가 지킨다.
+  확인법: `wsl -d chewie-env -- bash -lc "X='a b'; echo [\$X]"` → `[]` (깨짐),
+  같은 것을 `-e` 로 → `[a b]`.
 
 - **`sink(...)` 호출부** — `EventSink` 는 `Arc<dyn Fn>` 이고 autoderef 로 호출된다.
   시그니처를 바꿀 일이 있으면 호출부 전체가 함께 깨진다.
