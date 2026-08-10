@@ -6,9 +6,16 @@ import {
   envManualCommands,
   envProvision,
   envRebootToFirmware,
+  envRootfsOrigin,
   onProvision,
 } from "../lib/ipc";
-import { asAppError, type EnvReport, type FirmwareHint, type ProvisionEvent } from "../lib/types";
+import {
+  asAppError,
+  type EnvReport,
+  type FirmwareHint,
+  type ProvisionEvent,
+  type RootfsOrigin,
+} from "../lib/types";
 
 /**
  * 온보딩 (ARCHITECTURE.md §7).
@@ -119,7 +126,7 @@ function GateSteps({ report }: { report: EnvReport | null }) {
     {
       state: gate === "distro-missing" ? "blocked" : distroOk ? "done" : "pending",
       title: "③ 전용 배포판",
-      desc: "chewBBACA 가 들어 있는 rootfs 를 내려받아 등록합니다. (400~800MB)",
+      desc: "앱에 포함된 chewBBACA 이미지를 전용 배포판으로 등록합니다.",
     },
   ];
 
@@ -280,11 +287,24 @@ function WslGate() {
   );
 }
 
-/** rootfs 다운로드 → 검증 → import (§7.3 ③). */
+/** rootfs 확보 → 검증 → import (§7.3 ③). */
 function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
   const [running, setRunning] = useState(false);
   const [event, setEvent] = useState<ProvisionEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [origin, setOrigin] = useState<RootfsOrigin | null>(null);
+  /**
+   * 등록까지 끝났다. `running` 을 끄는 것만으로는 부족하다 — 부모가 환경을 다시
+   * 검사해 화면을 바꾸기까지 짧은 틈이 있고, 그 사이에 [설치] 버튼이 되살아나
+   * 이미 끝난 일을 다시 시킬 것처럼 보인다.
+   */
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    envRootfsOrigin()
+      .then(setOrigin)
+      .catch(() => setOrigin(null));
+  }, []);
 
   useEffect(() => {
     const un = onProvision((e) => {
@@ -295,6 +315,7 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
       }
       if (e.ok === true) {
         setRunning(false);
+        setDone(true);
         void onDone();
       }
     });
@@ -315,14 +336,26 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
   };
 
   const fraction = event?.fraction ?? null;
+  const remote = origin === "remote";
+  const missing = origin === "missing";
 
   return (
     <div className="card">
-      <h2>chewBBACA 환경 내려받기</h2>
+      <h2>{remote ? "chewBBACA 환경 내려받기" : "chewBBACA 환경 설치"}</h2>
       <p>
-        chewBBACA 와 BLAST+ / MAFFT / FastTree 가 들어 있는 이미지를 내려받아 전용 배포판으로
-        등록합니다. 한 번만 하면 됩니다.
+        chewBBACA 와 BLAST+ / MAFFT / FastTree 가 들어 있는 이미지를
+        {remote ? " 내려받아 " : " "}
+        전용 배포판으로 등록합니다. 한 번만 하면 됩니다.
+        {!remote && !missing && " 이미지는 앱에 포함되어 있어 인터넷 연결이 필요 없습니다."}
       </p>
+
+      {missing && (
+        <div className="banner warn">
+          앱에 포함된 rootfs 이미지를 찾을 수 없습니다. 인스톨러로 설치한 앱이라면 다시 설치해
+          주세요. 개발 중이라면 [설정] → rootfs 이미지 칸에 직접 빌드한 tar.gz 경로를 넣으면
+          됩니다.
+        </div>
+      )}
 
       {error && <div className="banner error">{error}</div>}
 
@@ -338,10 +371,17 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
         </div>
       ) : null}
 
-      {!running && (
-        <button className="primary" onClick={() => void start()} style={{ marginTop: 12 }}>
-          내려받고 설치
-        </button>
+      {done ? (
+        <p style={{ color: "var(--text-dim)", marginTop: 12 }}>
+          환경이 준비되었습니다. 잠시 후 앱으로 들어갑니다...
+        </p>
+      ) : (
+        !running &&
+        !missing && (
+          <button className="primary" onClick={() => void start()} style={{ marginTop: 12 }}>
+            {remote ? "내려받고 설치" : "설치"}
+          </button>
+        )
       )}
     </div>
   );

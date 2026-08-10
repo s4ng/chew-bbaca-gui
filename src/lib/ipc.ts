@@ -16,7 +16,9 @@ import type {
   JobSpec,
   LogEvent,
   ProgressEvent,
+  ProfilesInfo,
   ProvisionEvent,
+  RootfsOrigin,
   SchemaInfo,
   Settings,
   StateEvent,
@@ -31,6 +33,7 @@ export const envManualCommands = () => invoke<string[]>("env_manual_commands");
 export const envFirmwareHint = (manufacturer: string | null) =>
   invoke<FirmwareHint>("env_firmware_hint", { manufacturer });
 export const envRebootToFirmware = () => invoke<void>("env_reboot_to_firmware");
+export const envRootfsOrigin = () => invoke<RootfsOrigin>("env_rootfs_origin");
 export const envProvision = () => invoke<void>("env_provision");
 export const envUnregister = () => invoke<void>("env_unregister");
 
@@ -47,6 +50,8 @@ export const jobsGet = (jobId: string) => invoke<Job | null>("jobs_get", { jobId
 export const jobsCancel = (jobId: string) => invoke<void>("jobs_cancel", { jobId });
 export const jobsLog = (jobId: string) => invoke<string>("jobs_log", { jobId });
 export const jobsReconcile = () => invoke<Job[]>("jobs_reconcile");
+/** 이어받은 작업 중 아직 실행 중인 것. 화면을 다시 열 때마다 물어도 된다. */
+export const jobsAdopted = () => invoke<Job[]>("jobs_adopted");
 
 // ---------------------------------------------------------------- 스키마
 
@@ -60,6 +65,10 @@ export const schemasExport = (schemaId: string, dest: string) =>
 export const settingsGet = () => invoke<Settings>("settings_get");
 export const settingsSet = (settings: Settings) => invoke<void>("settings_set", { settings });
 export const inspectInputDir = (path: string) => invoke<InputDirInfo>("inspect_input_dir", { path });
+export const inspectProfilesFile = (path: string) =>
+  invoke<ProfilesInfo>("inspect_profiles_file", { path });
+/** 따라해보기 가이드를 앱 폴더에 꺼내 기본 브라우저로 연다. 반환값은 그 파일 경로. */
+export const guideOpen = () => invoke<string>("guide_open");
 
 // ---------------------------------------------------------------- 이벤트
 

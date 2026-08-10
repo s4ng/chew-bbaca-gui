@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatDuration, formatTime, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
-import { jobsCancel, jobsList, jobsReconcile, onProgress, onState } from "../lib/ipc";
+import { jobsAdopted, jobsCancel, jobsList, jobsReconcile, onProgress, onState } from "../lib/ipc";
 import { asAppError, type Job } from "../lib/types";
 import JobDetail from "./JobDetail";
 
@@ -13,21 +13,25 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
   const [adopted, setAdopted] = useState<Job[]>([]);
   const [progress, setProgress] = useState<Record<string, { fraction: number; label: string }>>({});
 
+  // 목록과 복구 배너를 함께 갱신한다. 배너를 조정의 반환값에서 받으면 화면을
+  // 한 번 옮겼다 돌아오는 순간 사라진다 — 조정은 프로세스당 한 번만 돌기 때문이다.
   const refresh = useCallback(async () => {
     try {
-      setJobs(await jobsList());
+      const [list, alive] = await Promise.all([jobsList(), jobsAdopted()]);
+      setJobs(list);
+      setAdopted(alive);
     } catch (e) {
       setError(asAppError(e).message);
     }
   }, []);
 
-  // 조정(reconciliation)은 앱 시작 후 UI 가 준비된 시점에 한 번만 돈다.
+  // 조정 자체는 앱 시작 후 UI 가 준비된 시점에 한 번만 실제로 수행된다.
+  // 두 번째 호출부터는 백엔드가 즉시 빈 값을 돌려주므로 여기서 매번 불러도 무해하다.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const alive = await jobsReconcile();
-        if (!cancelled) setAdopted(alive);
+        await jobsReconcile();
       } catch (e) {
         if (!cancelled) setError(asAppError(e).message);
       }
@@ -79,10 +83,8 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
               <button
                 className="danger"
                 onClick={() => {
-                  void jobsCancel(job.jobId).then(() => {
-                    setAdopted((prev) => prev.filter((j) => j.jobId !== job.jobId));
-                    void refresh();
-                  });
+                  // 취소되면 상태가 running 이 아니게 되어 배너에서 자동으로 빠진다.
+                  void jobsCancel(job.jobId).then(() => void refresh());
                 }}
               >
                 종료

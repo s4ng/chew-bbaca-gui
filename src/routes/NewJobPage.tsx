@@ -1,15 +1,71 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { backendStatus, inspectInputDir, jobsSubmit, schemasList, settingsGet } from "../lib/ipc";
+import { MODULE_INFO, MODULE_LABEL, MODULE_STEP } from "../lib/format";
+import {
+  backendStatus,
+  inspectInputDir,
+  inspectProfilesFile,
+  jobsSubmit,
+  schemasList,
+  settingsGet,
+} from "../lib/ipc";
 import {
   asAppError,
   type BackendStatus,
   type InputDirInfo,
   type JobSpec,
   type Module,
+  type ProfilesInfo,
   type SchemaInfo,
 } from "../lib/types";
+
+const PIPELINE: Module[] = ["CreateSchema", "AlleleCall", "ExtractCgMLST"];
+
+/**
+ * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
+ *
+ * 단계 번호를 붙이는 이유는 이 세 모듈이 **실제로 순서가 있는 절차**이기 때문이다.
+ * 사용자가 가장 자주 막히는 곳은 개별 모듈의 사용법이 아니라 "이제 뭘 해야 하지" 다.
+ */
+function ModuleGuide({ module }: { module: Module }) {
+  const info = MODULE_INFO[module];
+  const step = MODULE_STEP[module];
+
+  return (
+    <div className="module-info">
+      <div className="steps" aria-label="일반적인 실행 순서">
+        {PIPELINE.map((m) => (
+          <span key={m} className={`step ${m === module ? "on" : ""}`}>
+            {MODULE_STEP[m]}. {MODULE_LABEL[m]}
+          </span>
+        ))}
+      </div>
+
+      <p className="summary">{info.summary}</p>
+
+      <table className="kv">
+        <tbody>
+          <tr>
+            <td>필요한 것</td>
+            <td>{info.needs}</td>
+          </tr>
+          <tr>
+            <td>나오는 것</td>
+            <td>{info.gives}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {info.next && (
+        <p className="next">
+          <strong>다음 단계 ({step === 3 ? "2로 되돌아감" : `${step + 1}단계`})</strong> {info.next}
+        </p>
+      )}
+      {info.caution && <p className="caution">{info.caution}</p>}
+    </div>
+  );
+}
 
 export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void }) {
   const [module, setModule] = useState<Module>("CreateSchema");
@@ -21,6 +77,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
   const [lociList, setLociList] = useState("");
   const [cdsInput, setCdsInput] = useState(false);
   const [cpu, setCpu] = useState("");
+  const [profilesFile, setProfilesFile] = useState("");
+  const [profilesInfo, setProfilesInfo] = useState<ProfilesInfo | null>(null);
+  const [thresholds, setThresholds] = useState("");
 
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [backend, setBackend] = useState<BackendStatus | null>(null);
@@ -70,13 +129,34 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     };
   }, [inputDir]);
 
+  // 고른 즉시 진짜 allelic profile 표인지 확인한다. AlleleCall 결과 폴더에는 TSV 가
+  // 일곱 개 있고, 엉뚱한 것을 넣으면 chewBBACA 가 거절하지 않고 한참 헛돈다.
+  useEffect(() => {
+    if (!profilesFile) {
+      setProfilesInfo(null);
+      return;
+    }
+    let cancelled = false;
+    inspectProfilesFile(profilesFile)
+      .then((info) => !cancelled && setProfilesInfo(info))
+      .catch((e) => {
+        if (!cancelled) {
+          setProfilesInfo(null);
+          setError(asAppError(e).message);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [profilesFile]);
+
   const submit = async () => {
     setError(null);
     setBusy(true);
     try {
       const spec: JobSpec = {
         module,
-        inputDir,
+        inputDir: module === "ExtractCgMLST" ? "" : inputDir,
         outputDir,
         cdsInput,
         schemaId: module === "AlleleCall" ? schemaId : null,
@@ -84,6 +164,8 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         ptf: module === "CreateSchema" && ptf ? ptf : null,
         lociList: module === "AlleleCall" && lociList ? lociList : null,
         cpu: cpu ? Number(cpu) : null,
+        profilesFile: module === "ExtractCgMLST" ? profilesFile : null,
+        thresholds: module === "ExtractCgMLST" && thresholds.trim() ? thresholds.trim() : null,
       };
       await jobsSubmit(spec);
       onSubmitted();
@@ -94,10 +176,14 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     }
   };
 
+  // CreateSchema 는 산출물이 앱 저장소로 가므로 결과 폴더가 선택 항목이다.
   const ready =
-    inputDir !== "" &&
-    outputDir !== "" &&
-    (module === "CreateSchema" ? schemaName.trim() !== "" : schemaId !== "");
+    (module === "CreateSchema" || outputDir !== "") &&
+    (module === "CreateSchema"
+      ? inputDir !== "" && schemaName.trim() !== ""
+      : module === "AlleleCall"
+        ? inputDir !== "" && schemaId !== ""
+        : profilesFile !== "" && profilesInfo?.looksValid === true);
 
   return (
     <>
@@ -123,23 +209,65 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           >
             <option value="CreateSchema">CreateSchema — 어셈블리로부터 wgMLST 스키마 생성</option>
             <option value="AlleleCall">AlleleCall — 균주별 allelic profile 결정</option>
+            <option value="ExtractCgMLST">ExtractCgMLST — allele 결과에서 core genome 추출</option>
           </select>
         </div>
 
-        <div className="field">
-          <label htmlFor="input">어셈블리 폴더</label>
-          <div className="row">
-            <input id="input" type="text" value={inputDir} readOnly placeholder="폴더를 선택하세요" />
-            <button onClick={() => void pickDir(setInputDir)}>찾아보기</button>
-          </div>
-          <div className="hint">
-            {inputInfo
-              ? `파일 ${inputInfo.totalFiles}개 (FASTA로 보이는 파일 ${inputInfo.fastaFiles}개)`
-              : "네트워크 드라이브(UNC) 경로는 지원하지 않습니다. 로컬 드라이브를 사용하세요."}
-          </div>
-        </div>
+        <ModuleGuide module={module} />
+      </div>
 
-        {module === "CreateSchema" ? (
+      <div className="card">
+
+        {module === "ExtractCgMLST" ? (
+          <div className="field">
+            <label htmlFor="profiles">AlleleCall 결과 파일</label>
+            <div className="row">
+              <input
+                id="profiles"
+                type="text"
+                value={profilesFile}
+                readOnly
+                placeholder="results_alleles.tsv 를 선택하세요"
+              />
+              <button
+                onClick={() => void pickFile(setProfilesFile, "allelic profile", ["tsv"])}
+              >
+                찾아보기
+              </button>
+            </div>
+            {profilesInfo && !profilesInfo.looksValid ? (
+              <div className="banner error" style={{ marginTop: 8, marginBottom: 0 }}>
+                이 파일은 allelic profile 표가 아닙니다 — 첫 열이{" "}
+                <code>{profilesInfo.firstColumn}</code>, 열 {profilesInfo.loci + 1}개입니다.
+                <br />
+                AlleleCall 결과 폴더의 <code>results_alleles.tsv</code> 를 선택하세요. 같은
+                폴더의 다른 TSV(<code>cds_coordinates.tsv</code> 등)를 넣으면 각 행이 균주로
+                취급되어 오래 실행된 뒤 쓸모없는 결과가 나옵니다.
+              </div>
+            ) : (
+              <div className="hint">
+                {profilesInfo
+                  ? `균주 ${profilesInfo.genomes}개 × loci ${profilesInfo.loci}개`
+                  : "AlleleCall 결과 폴더 안의 results_alleles.tsv 입니다. 이 모듈은 어셈블리를 다시 읽지 않고 그 표만 봅니다."}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor="input">어셈블리 폴더</label>
+            <div className="row">
+              <input id="input" type="text" value={inputDir} readOnly placeholder="폴더를 선택하세요" />
+              <button onClick={() => void pickDir(setInputDir)}>찾아보기</button>
+            </div>
+            <div className="hint">
+              {inputInfo
+                ? `파일 ${inputInfo.totalFiles}개 (FASTA로 보이는 파일 ${inputInfo.fastaFiles}개)`
+                : "네트워크 드라이브(UNC) 경로는 지원하지 않습니다. 로컬 드라이브를 사용하세요."}
+            </div>
+          </div>
+        )}
+
+        {module === "CreateSchema" && (
           <>
             <div className="field">
               <label htmlFor="schemaName">스키마 이름</label>
@@ -182,7 +310,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               </label>
             </div>
           </>
-        ) : (
+        )}
+
+        {module === "AlleleCall" && (
           <>
             <div className="field">
               <label htmlFor="schema">스키마</label>
@@ -211,23 +341,62 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 </button>
                 {lociList && <button onClick={() => setLociList("")}>지우기</button>}
               </div>
+              <div className="hint">
+                이 목록은 ExtractCgMLST 가 만들어 줍니다 (<code>cgMLSTschema95.txt</code> 등).
+                비워두면 스키마의 모든 loci 를 대상으로 합니다.
+              </div>
             </div>
           </>
         )}
 
+        {module === "ExtractCgMLST" && (
+          <div className="field">
+            <label htmlFor="thr">존재 임계값 (--t) — 선택</label>
+            <input
+              id="thr"
+              type="text"
+              value={thresholds}
+              onChange={(e) => setThresholds(e.target.value)}
+              placeholder="비우면 0.95 / 0.99 / 1 을 모두 계산"
+            />
+            <div className="hint">
+              어떤 loci 를 core 로 볼지 정하는 기준입니다. 0.95 면 &quot;균주의 95% 이상에
+              존재하는 loci&quot; 를 뜻합니다. 공백으로 구분해 여러 값을 넣을 수 있고, 값마다
+              결과 한 벌씩 나옵니다.
+            </div>
+          </div>
+        )}
+
         <div className="field">
-          <label htmlFor="output">결과 폴더</label>
+          <label htmlFor="output">
+            결과 폴더{module === "CreateSchema" ? " — 선택" : ""}
+          </label>
           <div className="row">
-            <input id="output" type="text" value={outputDir} readOnly placeholder="폴더를 선택하세요" />
+            <input
+              id="output"
+              type="text"
+              value={outputDir}
+              readOnly
+              placeholder={
+                module === "CreateSchema" ? "(선택) 비워두어도 됩니다" : "폴더를 선택하세요"
+              }
+            />
             <button onClick={() => void pickDir(setOutputDir)}>찾아보기</button>
+            {module === "CreateSchema" && outputDir && (
+              <button onClick={() => setOutputDir("")}>지우기</button>
+            )}
           </div>
           <div className="hint">
             {module === "CreateSchema"
-              ? "CreateSchema 의 산출물인 스키마 자체는 앱 저장소에 보관됩니다. 이 폴더는 로그와 내보내기 기본 위치로 쓰입니다."
-              : "AlleleCall 결과가 이 폴더로 회수됩니다."}
+              ? "만들어진 스키마는 앱 저장소에 보관되고 [스키마] 화면에서 관리합니다. 이 폴더를 지정하면 실행 로그 사본만 남습니다 — 스키마 파일은 [스키마] → [내보내기] 로 꺼냅니다."
+              : module === "AlleleCall"
+                ? "AlleleCall 결과가 이 폴더로 회수됩니다."
+                : "cgMLST 프로파일과 loci 목록(cgMLSTschema*.txt)이 이 폴더로 회수됩니다."}
           </div>
         </div>
 
+        {/* ExtractCgMLST 에는 --cpu 인자가 없다 (cli.rs 참조). */}
+        {module !== "ExtractCgMLST" && (
         <div className="field">
           <label htmlFor="cpu">CPU 개수 — 선택</label>
           <input
@@ -243,6 +412,7 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             있습니다.
           </div>
         </div>
+        )}
 
         <div className="row">
           <button className="primary" disabled={!ready || busy} onClick={() => void submit()}>

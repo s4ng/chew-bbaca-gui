@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
-import { envProbe } from "./lib/ipc";
+import { envProbe, guideOpen } from "./lib/ipc";
 import { asAppError, type EnvReport } from "./lib/types";
 import JobsPage from "./routes/JobsPage";
 import NewJobPage from "./routes/NewJobPage";
@@ -9,6 +10,15 @@ import SchemasPage from "./routes/SchemasPage";
 import SettingsPage from "./routes/SettingsPage";
 
 type View = "jobs" | "new" | "schemas" | "settings";
+
+/**
+ * chewBBACA 공식 문서. 앱이 답하지 않는 질문(모듈 인자의 의미, 분류 코드 해석 등)은
+ * 결국 여기로 가야 한다.
+ *
+ * `<a href>` 를 쓰면 웹뷰가 앱 밖으로 이동해 돌아올 수 없다. 반드시 기본 브라우저로
+ * 연다 — `opener:default` 에 https 스코프가 포함돼 있어 추가 권한 설정은 필요 없다.
+ */
+const DOCS_URL = "https://chewbbaca.readthedocs.io/en/latest/";
 
 const NAV: { id: View; label: string }[] = [
   { id: "jobs", label: "작업" },
@@ -22,6 +32,8 @@ export default function App() {
   const [probeError, setProbeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
   const [view, setView] = useState<View>("jobs");
+  /** 문서 열기가 실패하면 조용히 넘어가지 않는다 — 아무 반응이 없으면 원인을 알 수 없다. */
+  const [linkError, setLinkError] = useState<string | null>(null);
 
   const recheck = useCallback(async () => {
     setChecking(true);
@@ -84,7 +96,31 @@ export default function App() {
           </button>
         ))}
         <div className="sidebar-footer">
-          배포판 <code>{report.distro}</code>
+          {/* 가이드는 앱에 묻어 나가므로 인터넷 없이도 열린다. */}
+          <button
+            className="doc-link"
+            onClick={() => {
+              setLinkError(null);
+              void guideOpen().catch((e) => setLinkError(asAppError(e).message));
+            }}
+            title="예제 데이터로 전 과정을 따라가 보는 안내서"
+          >
+            따라해보기 ↗
+          </button>
+          <button
+            className="doc-link"
+            onClick={() => {
+              setLinkError(null);
+              void openUrl(DOCS_URL).catch((e) => setLinkError(asAppError(e).message));
+            }}
+            title={DOCS_URL}
+          >
+            chewBBACA 공식 문서 ↗
+          </button>
+          {linkError && <div className="link-error">{linkError}</div>}
+          <div className="distro">
+            배포판 <code>{report.distro}</code>
+          </div>
         </div>
       </nav>
 
