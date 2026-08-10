@@ -38,11 +38,6 @@ impl Module {
         }
     }
 
-    /// 어셈블리 폴더를 입력으로 받는가. `false` 면 파일 하나만 스테이징한다.
-    pub fn takes_input_dir(self) -> bool {
-        !matches!(self, Module::ExtractCgMLST)
-    }
-
     /// 결과 폴더가 반드시 있어야 하는가.
     ///
     /// CreateSchema 는 산출물인 스키마를 앱 저장소에 넣으므로 회수할 것이 없다.
@@ -101,31 +96,81 @@ impl JobStatus {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JobSpec {
-    pub module: Module,
-    /// 어셈블리(FASTA) 폴더
-    pub input_dir: String,
-    /// 결과를 회수할 Windows 폴더
+    /// 결과를 회수할 Windows 폴더. CreateSchema 는 회수할 것이 없어 비어 있을 수 있다.
     pub output_dir: String,
-    /// AlleleCall: 사용할 스키마. CreateSchema: 만들어질 스키마 이름의 원본.
-    pub schema_id: Option<String>,
-    /// CreateSchema 로 새로 만들 스키마의 표시 이름
-    pub schema_name: Option<String>,
-    /// CreateSchema 용 Prodigal training file (Windows 경로). 생략 가능.
-    pub ptf: Option<String>,
-    /// 입력이 이미 CDS 인 경우 `--cds`
-    #[serde(default)]
-    pub cds_input: bool,
-    /// 일부 loci 만 대상으로 할 때 (`--gl`) 사용할 목록 파일 (Windows 경로)
-    pub loci_list: Option<String>,
     /// 미지정 시 WSL 내부 `nproc` 값을 사용한다 (§6.4)
     pub cpu: Option<u32>,
-    /// ExtractCgMLST 입력: AlleleCall 이 만든 `results_alleles.tsv` (Windows 경로).
-    /// 이 모듈은 `input_dir` 을 쓰지 않는다.
-    #[serde(default)]
-    pub profiles_file: Option<String>,
-    /// ExtractCgMLST 의 `--t`. 비우면 chewBBACA 기본값(0.95 / 0.99 / 1)을 모두 계산한다.
-    #[serde(default)]
-    pub thresholds: Option<String>,
+    /// 모듈별 파라미터. `flatten` 이라 JSON 은 평평하게 유지된다 —
+    /// `{"module":"AlleleCall","outputDir":…,"inputDir":…,"schemaId":…}`
+    #[serde(flatten)]
+    pub params: ModuleParams,
+}
+
+/// 모듈마다 필요한 것이 다르다. 한 구조체에 모두 쌓으면 어떤 조합이 유효한지가
+/// 코드 어디에도 적히지 않게 되고, 모듈이 늘 때마다 `Option` 만 늘어난다.
+///
+/// `module` 을 태그로 쓰므로 이 열거형 자체가 곧 모듈 판정이다 — 별도의 `module`
+/// 필드를 두면 둘이 어긋날 수 있다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "module", rename_all = "camelCase")]
+pub enum ModuleParams {
+    CreateSchema {
+        /// 어셈블리(FASTA) 폴더
+        input_dir: String,
+        /// 만들 스키마의 표시 이름
+        schema_name: String,
+        /// Prodigal training file (Windows 경로). 생략 가능.
+        #[serde(default)]
+        ptf: Option<String>,
+        /// 입력이 이미 CDS 인 경우 `--cds`
+        #[serde(default)]
+        cds_input: bool,
+    },
+    AlleleCall {
+        input_dir: String,
+        /// 사용할 스키마
+        schema_id: String,
+        /// 일부 loci 만 대상으로 할 때 (`--gl`) 쓸 목록 파일 (Windows 경로)
+        #[serde(default)]
+        loci_list: Option<String>,
+        #[serde(default)]
+        cds_input: bool,
+    },
+    ExtractCgMLST {
+        /// AlleleCall 이 만든 `results_alleles.tsv` (Windows 경로).
+        /// 이 모듈은 어셈블리 폴더를 쓰지 않는다.
+        profiles_file: String,
+        /// `--t`. 비우면 chewBBACA 기본값(0.95 / 0.99 / 1)을 모두 계산한다.
+        #[serde(default)]
+        thresholds: Option<String>,
+    },
+}
+
+impl JobSpec {
+    pub fn module(&self) -> Module {
+        match self.params {
+            ModuleParams::CreateSchema { .. } => Module::CreateSchema,
+            ModuleParams::AlleleCall { .. } => Module::AlleleCall,
+            ModuleParams::ExtractCgMLST { .. } => Module::ExtractCgMLST,
+        }
+    }
+
+    /// 어셈블리 폴더를 쓰는 모듈이면 그 경로. 아니면 `None`.
+    pub fn input_dir(&self) -> Option<&str> {
+        match &self.params {
+            ModuleParams::CreateSchema { input_dir, .. }
+            | ModuleParams::AlleleCall { input_dir, .. } => Some(input_dir),
+            ModuleParams::ExtractCgMLST { .. } => None,
+        }
+    }
+
+    pub fn cds_input(&self) -> bool {
+        match self.params {
+            ModuleParams::CreateSchema { cds_input, .. }
+            | ModuleParams::AlleleCall { cds_input, .. } => cds_input,
+            ModuleParams::ExtractCgMLST { .. } => false,
+        }
+    }
 }
 
 /// SQLite `jobs` 한 행. UI 목록/상세가 그대로 사용한다.

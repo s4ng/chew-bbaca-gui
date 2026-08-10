@@ -137,7 +137,10 @@ mod tests {
         let mut a = args();
         a.thresholds = Some("0.95 0.99 1".into());
         let v = build_argv(Module::ExtractCgMLST, &a);
-        let t = v.iter().position(|x| x == "--t").expect("--t 가 있어야 한다");
+        let t = v
+            .iter()
+            .position(|x| x == "--t")
+            .expect("--t 가 있어야 한다");
         assert_eq!(&v[t + 1..t + 4], ["0.95", "0.99", "1"]);
     }
 

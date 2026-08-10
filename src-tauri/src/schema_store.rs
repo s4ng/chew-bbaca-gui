@@ -47,10 +47,7 @@ impl SchemaStore {
             // loci 수가 비어 있으면 지금 채운다. 예전에 디렉터리만 보고 복구된 항목이나,
             // 조사 시점에 아직 파일이 다 쓰이지 않았던 항목이 여기 해당한다.
             if info.loci_count.is_none() {
-                if let Ok(found) = self
-                    .runner
-                    .inspect_schema_dir(&info.schema_id, &info.name)
-                {
+                if let Ok(found) = self.runner.inspect_schema_dir(&info.schema_id, &info.name) {
                     if found.loci_count.is_some() {
                         info.loci_count = found.loci_count;
                         info.ptf = found.ptf.or(info.ptf);
@@ -151,7 +148,10 @@ impl SchemaStore {
         let backend_path = self.runner.import_schema_dir(src, &schema_id)?;
 
         // 복사가 끝난 뒤 실제 값으로 등록한다. 원본을 세는 것보다 확실하다.
-        let probed = self.runner.inspect_schema_dir(&schema_id, display_name).ok();
+        let probed = self
+            .runner
+            .inspect_schema_dir(&schema_id, display_name)
+            .ok();
         let info = SchemaInfo {
             schema_id,
             name: display_name.to_string(),

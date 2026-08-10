@@ -65,9 +65,7 @@ fn local_app_data() -> Result<PathBuf> {
     if let Ok(home) = std::env::var("USERPROFILE") {
         return Ok(PathBuf::from(home).join("AppData").join("Local"));
     }
-    Err(Error::Other(
-        "%LOCALAPPDATA% 를 확인할 수 없습니다".into(),
-    ))
+    Err(Error::Other("%LOCALAPPDATA% 를 확인할 수 없습니다".into()))
 }
 
 /// 입력 단계 게이트 (§5.4).

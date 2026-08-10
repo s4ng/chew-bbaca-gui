@@ -177,7 +177,8 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     }
     if !settings.checksum_looks_valid() {
         return Err(Error::Other(
-            "설정의 SHA256 값이 64자리 16진수가 아닙니다. 설정 화면에서 체크섬을 확인해 주세요.".into(),
+            "설정의 SHA256 값이 64자리 16진수가 아닙니다. 설정 화면에서 체크섬을 확인해 주세요."
+                .into(),
         ));
     }
 
@@ -187,17 +188,18 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let source = settings.rootfs.clone();
 
     std::thread::spawn(move || {
-        let emit = |stage: &'static str, message: String, fraction: Option<f32>, ok: Option<bool>| {
-            let _ = app.emit(
-                EVENT_PROVISION,
-                ProvisionEvent {
-                    stage,
-                    message,
-                    fraction,
-                    ok,
-                },
-            );
-        };
+        let emit =
+            |stage: &'static str, message: String, fraction: Option<f32>, ok: Option<bool>| {
+                let _ = app.emit(
+                    EVENT_PROVISION,
+                    ProvisionEvent {
+                        stage,
+                        message,
+                        fraction,
+                        ok,
+                    },
+                );
+            };
 
         // 다운로드 단계와 검증 단계는 같은 진행률 콜백을 쓴다 (둘 다 바이트 단위 진행).
         let stage = if downloading { "download" } else { "verify" };
@@ -239,7 +241,12 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
         emit("import", "배포판을 등록하는 중...".into(), None, None);
 
         match provisioner.import_distro(&tarball) {
-            Ok(()) => emit("done", "환경 구성이 완료되었습니다".into(), None, Some(true)),
+            Ok(()) => emit(
+                "done",
+                "환경 구성이 완료되었습니다".into(),
+                None,
+                Some(true),
+            ),
             Err(e) => emit("import", e.to_string(), None, Some(false)),
         }
     });
@@ -329,11 +336,7 @@ pub fn schemas_delete(state: State<'_, AppState>, schema_id: String) -> Result<(
 
 /// 내보낸 스키마 폴더를 다시 들여온다. 되돌릴 수 있는 조작이라 확인을 받지 않는다.
 #[tauri::command]
-pub fn schemas_import(
-    state: State<'_, AppState>,
-    dir: String,
-    name: String,
-) -> Result<SchemaInfo> {
+pub fn schemas_import(state: State<'_, AppState>, dir: String, name: String) -> Result<SchemaInfo> {
     state.schemas().import(Path::new(&dir), &name)
 }
 
@@ -591,11 +594,15 @@ mod tests {
     fn a_loci_list_is_accepted_and_counted() {
         // ExtractCgMLST 가 만드는 cgMLSTschema*.txt 모양 — 한 줄에 식별자 하나.
         let path = std::env::temp_dir().join("chewie-gate-loci.txt");
-        std::fs::write(&path, "genome1-protein1
+        std::fs::write(
+            &path,
+            "genome1-protein1
 genome1-protein10
 
 genome1-protein11
-").unwrap();
+",
+        )
+        .unwrap();
         let info = inspect_loci_list(path.to_string_lossy().to_string()).unwrap();
         assert!(info.looks_valid);
         assert_eq!(info.loci, 3, "빈 줄은 세지 않는다");
@@ -606,9 +613,13 @@ genome1-protein11
     fn a_profile_table_is_rejected_as_a_loci_list() {
         // 프로파일 표를 --gl 에 넣는 것이 흔한 실수다. 탭이 있으면 표로 본다.
         let path = std::env::temp_dir().join("chewie-gate-loci-tsv.txt");
-        std::fs::write(&path, "FILE	locus1	locus2
+        std::fs::write(
+            &path,
+            "FILE	locus1	locus2
 g1	1	2
-").unwrap();
+",
+        )
+        .unwrap();
         let info = inspect_loci_list(path.to_string_lossy().to_string()).unwrap();
         assert!(!info.looks_valid);
         assert!(info.tabbed);

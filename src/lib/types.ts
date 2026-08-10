@@ -23,21 +23,40 @@ export interface Job {
   progress: number | null;
 }
 
-export interface JobSpec {
-  module: Module;
-  inputDir: string;
+/**
+ * 모든 모듈에 공통인 것. Rust `JobSpec` 과 1:1.
+ *
+ * 모듈별 필드는 아래 유니온이 들고 있다. 한 덩어리로 두면 어떤 조합이 유효한지가
+ * 타입에 적히지 않아, 폼이 엉뚱한 조합을 보내도 컴파일이 통과한다.
+ */
+interface JobSpecCommon {
+  /** 결과를 회수할 폴더. CreateSchema 는 비어 있어도 된다. */
   outputDir: string;
-  schemaId?: string | null;
-  schemaName?: string | null;
-  ptf?: string | null;
-  cdsInput: boolean;
-  lociList?: string | null;
   cpu?: number | null;
-  /** ExtractCgMLST 입력: AlleleCall 이 만든 results_alleles.tsv */
-  profilesFile?: string | null;
-  /** ExtractCgMLST 의 --t. 비우면 기본값(0.95 / 0.99 / 1)을 모두 계산한다 */
-  thresholds?: string | null;
 }
+
+export type JobSpec =
+  | (JobSpecCommon & {
+      module: "CreateSchema";
+      inputDir: string;
+      schemaName: string;
+      ptf?: string | null;
+      cdsInput: boolean;
+    })
+  | (JobSpecCommon & {
+      module: "AlleleCall";
+      inputDir: string;
+      schemaId: string;
+      lociList?: string | null;
+      cdsInput: boolean;
+    })
+  | (JobSpecCommon & {
+      module: "ExtractCgMLST";
+      /** AlleleCall 이 만든 results_alleles.tsv */
+      profilesFile: string;
+      /** --t. 비우면 기본값(0.95 / 0.99 / 1)을 모두 계산한다 */
+      thresholds?: string | null;
+    });
 
 export interface SchemaInfo {
   schemaId: string;

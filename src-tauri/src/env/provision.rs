@@ -95,7 +95,9 @@ impl Provisioner {
         // Store 가 차단된 환경에서는 인박스 버전으로 우회한다.
         let inbox = win::run_elevated("wsl.exe", &["--install", "--no-distribution", "--inbox"])?;
         if inbox.ok() {
-            return Ok("WSL(인박스 버전) 설치 요청이 완료되었습니다. 재부팅 후 다시 실행하세요.".into());
+            return Ok(
+                "WSL(인박스 버전) 설치 요청이 완료되었습니다. 재부팅 후 다시 실행하세요.".into(),
+            );
         }
 
         Err(Error::Other(format!(
@@ -108,7 +110,8 @@ impl Provisioner {
     /// WSL1 이 기본값인 경우를 정정한다 (§7.5-4). 권한 상승이 필요 없다.
     pub fn set_default_version_2(&self) -> Result<()> {
         let mut cmd = win::command("wsl.exe");
-        cmd.env("WSL_UTF8", "1").args(["--set-default-version", "2"]);
+        cmd.env("WSL_UTF8", "1")
+            .args(["--set-default-version", "2"]);
         win::capture(&mut cmd)?;
         Ok(())
     }

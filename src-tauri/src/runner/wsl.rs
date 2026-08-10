@@ -15,12 +15,12 @@ use std::sync::Mutex;
 use std::thread;
 
 use crate::error::{Error, Result};
-use crate::models::{JobSpec, Module};
+use crate::models::{JobSpec, Module, ModuleParams};
 use crate::paths::validate_host_path;
 use crate::runner::cli::{build_argv, BackendArgs};
 use crate::runner::{
-    schema_id_for, BackendStatus, ChewieRunner, CreatedSchema, EventSink, JobHandle, RunEvent,
-    RunOutcome,
+    schema_id_for, schema_name_of, BackendStatus, ChewieRunner, CreatedSchema, EventSink,
+    JobHandle, RunEvent, RunOutcome,
 };
 use crate::util::sh_quote;
 use crate::win;
@@ -164,9 +164,7 @@ impl WslRunner {
         let out = self.bash(&script)?.require_success()?;
         let name = out.stdout.trim().to_string();
         if name.is_empty() {
-            return Err(Error::Other(
-                "입력 파일 이름을 확인하지 못했습니다".into(),
-            ));
+            return Err(Error::Other("입력 파일 이름을 확인하지 못했습니다".into()));
         }
         sink(RunEvent::Notice(format!("입력 파일 준비 완료: {name}")));
         Ok(format!("{work}/input/{name}"))
@@ -235,7 +233,9 @@ impl WslRunner {
     fn collect_output(&self, work: &str, host_dest: &Path, sink: &EventSink) -> Result<String> {
         std::fs::create_dir_all(host_dest)?;
         let dest_backend = self.to_backend_path(host_dest)?;
-        sink(RunEvent::Notice("결과를 Windows 폴더로 회수하는 중...".into()));
+        sink(RunEvent::Notice(
+            "결과를 Windows 폴더로 회수하는 중...".into(),
+        ));
         let script = format!(
             "set -e
              mkdir -p {dest}
@@ -283,7 +283,10 @@ impl ChewieRunner for WslRunner {
     fn ensure_ready(&self) -> Result<()> {
         // §7.3 의 낙관적 시도와 같은 명령. 실패하면 온보딩 게이트로 내려간다.
         let out = self.exec(&["true"]).map_err(|e| {
-            Error::BackendUnavailable(format!("배포판 '{}' 를 실행할 수 없습니다: {e}", self.distro))
+            Error::BackendUnavailable(format!(
+                "배포판 '{}' 를 실행할 수 없습니다: {e}",
+                self.distro
+            ))
         })?;
         if !out.ok() {
             return Err(Error::BackendUnavailable(format!(
@@ -337,7 +340,9 @@ impl ChewieRunner for WslRunner {
         }
         let converted = out.stdout.trim().to_string();
         if converted.is_empty() {
-            return Err(Error::InvalidInput(format!("경로 변환 결과가 비었습니다: {raw}")));
+            return Err(Error::InvalidInput(format!(
+                "경로 변환 결과가 비었습니다: {raw}"
+            )));
         }
         Ok(converted)
     }
@@ -359,21 +364,21 @@ impl ChewieRunner for WslRunner {
         let work = self.work_dir(job_id)?;
 
         // 입력 모양이 모듈마다 다르다 — 어셈블리 폴더이거나, TSV 파일 하나이거나.
-        let staged_input = if spec.module.takes_input_dir() {
-            validate_host_path(Path::new(&spec.input_dir))?;
-            let input_backend = self.to_backend_path(Path::new(&spec.input_dir))?;
-            self.stage_input(&work, &input_backend, sink)?;
-            format!("{work}/input")
-        } else {
-            let file = spec.profiles_file.as_deref().ok_or_else(|| {
-                Error::InvalidInput(
-                    "ExtractCgMLST 에는 AlleleCall 결과 파일(results_alleles.tsv)이 필요합니다"
-                        .into(),
-                )
-            })?;
-            validate_host_path(Path::new(file))?;
-            let src = self.to_backend_path(Path::new(file))?;
-            self.stage_file(&work, &src, sink)?
+        let staged_input = match spec.input_dir() {
+            Some(dir) => {
+                validate_host_path(Path::new(dir))?;
+                let input_backend = self.to_backend_path(Path::new(dir))?;
+                self.stage_input(&work, &input_backend, sink)?;
+                format!("{work}/input")
+            }
+            None => {
+                let ModuleParams::ExtractCgMLST { profiles_file, .. } = &spec.params else {
+                    return Err(Error::Other("입력이 없는 모듈이 아닙니다".into()));
+                };
+                validate_host_path(Path::new(profiles_file))?;
+                let src = self.to_backend_path(Path::new(profiles_file))?;
+                self.stage_file(&work, &src, sink)?
+            }
         };
 
         let cpu = match spec.cpu {
@@ -386,9 +391,8 @@ impl ChewieRunner for WslRunner {
             // 폴더 모듈은 `{work}/input`, 파일 모듈은 복사된 파일의 경로가 들어온다.
             input: staged_input,
             output: format!("{work}/output"),
-            cds_input: spec.cds_input,
+            cds_input: spec.cds_input(),
             cpu,
-            thresholds: spec.thresholds.clone(),
             ..Default::default()
         };
 
@@ -397,36 +401,34 @@ impl ChewieRunner for WslRunner {
         //  - AlleleCall:    결과는 사용자 것이므로 work/output 을 거쳐 회수한다
         //  - ExtractCgMLST: 마찬가지로 회수한다 (cgMLSTschema*.txt 가 다음 실행의 입력이 된다)
         let mut created_schema_target: Option<(String, String)> = None;
-        match spec.module {
-            Module::CreateSchema => {
-                let name = spec
-                    .schema_name
-                    .clone()
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or_else(|| format!("schema-{job_id}"));
+        match &spec.params {
+            ModuleParams::CreateSchema { ptf, .. } => {
                 // 조정(reconciliation)이 같은 값을 다시 만들어야 하므로 규칙은 공용이다.
                 let schema_id = schema_id_for(job_id, spec);
                 let path = format!("{}/{}", self.schema_root()?, schema_id);
                 args.output = path.clone();
-                if let Some(ptf) = &spec.ptf {
-                    args.ptf = Some(self.to_backend_path(Path::new(ptf))?);
+                if let Some(p) = ptf {
+                    args.ptf = Some(self.to_backend_path(Path::new(p))?);
                 }
-                created_schema_target = Some((schema_id, name));
+                created_schema_target = Some((schema_id, schema_name_of(spec).to_string()));
             }
-            Module::AlleleCall => {
-                let schema_id = spec.schema_id.clone().ok_or_else(|| {
-                    Error::InvalidInput("AlleleCall 에는 스키마 선택이 필요합니다".into())
-                })?;
+            ModuleParams::AlleleCall {
+                schema_id,
+                loci_list,
+                ..
+            } => {
                 args.schema = Some(format!("{}/{}", self.schema_root()?, schema_id));
-                if let Some(gl) = &spec.loci_list {
+                if let Some(gl) = loci_list {
                     args.loci_list = Some(self.to_backend_path(Path::new(gl))?);
                 }
             }
-            // 스키마도 어셈블리도 필요 없다. 입력 TSV 는 위에서 이미 스테이징했다.
-            Module::ExtractCgMLST => {}
+            ModuleParams::ExtractCgMLST { thresholds, .. } => {
+                // 스키마도 어셈블리도 필요 없다. 입력 TSV 는 위에서 이미 스테이징했다.
+                args.thresholds = thresholds.clone();
+            }
         }
 
-        let argv = build_argv(spec.module, &args);
+        let argv = build_argv(spec.module(), &args);
         sink(RunEvent::Notice(format!("실행: {}", argv.join(" "))));
 
         let exit_code = self.spawn_and_stream(&work, &argv, sink)?;
@@ -482,14 +484,16 @@ impl ChewieRunner for WslRunner {
         let Some(pgid) = handle.pgid else {
             return Ok(false);
         };
-        let out = self.bash(&format!("kill -0 -{pgid} 2>/dev/null && echo alive || echo dead"))?;
+        let out = self.bash(&format!(
+            "kill -0 -{pgid} 2>/dev/null && echo alive || echo dead"
+        ))?;
         Ok(out.stdout.trim() == "alive")
     }
 
     fn output_produced(&self, job_id: &str, spec: &JobSpec) -> Result<bool> {
         // CreateSchema 의 산출물은 작업 디렉터리가 아니라 스키마 저장소에 있다.
         // 여기를 작업 디렉터리로 보면 성공한 고아 작업이 전부 실패로 확정된다.
-        let target = if spec.module == Module::CreateSchema {
+        let target = if spec.module() == Module::CreateSchema {
             format!(
                 "{}/{}/schema_seed",
                 self.schema_root()?,
@@ -499,7 +503,10 @@ impl ChewieRunner for WslRunner {
             format!("{}/output", self.work_dir(job_id)?)
         };
 
-        let out = self.bash(&format!("ls -A {} 2>/dev/null | head -n 1", sh_quote(&target)))?;
+        let out = self.bash(&format!(
+            "ls -A {} 2>/dev/null | head -n 1",
+            sh_quote(&target)
+        ))?;
         Ok(!out.stdout.trim().is_empty())
     }
 
@@ -529,7 +536,9 @@ impl ChewieRunner for WslRunner {
     fn remove_schema(&self, schema_id: &str) -> Result<()> {
         // 상위 디렉터리 탈출을 막는다. schema_id 는 DB 에서 오지만 방어한다.
         if schema_id.contains('/') || schema_id.contains("..") || schema_id.is_empty() {
-            return Err(Error::InvalidInput(format!("잘못된 스키마 ID: {schema_id}")));
+            return Err(Error::InvalidInput(format!(
+                "잘못된 스키마 ID: {schema_id}"
+            )));
         }
         let path = format!("{}/{}", self.schema_root()?, schema_id);
         self.bash(&format!("rm -rf {}", sh_quote(&path)))?

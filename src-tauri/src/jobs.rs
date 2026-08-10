@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
-    Job, JobSpec, JobStatus, LogEvent, LogStream, Module, ProgressEvent, SchemaInfo, StateEvent,
-    EVENT_LOG, EVENT_PROGRESS, EVENT_STATE,
+    Job, JobSpec, JobStatus, LogEvent, LogStream, Module, ModuleParams, ProgressEvent, SchemaInfo,
+    StateEvent, EVENT_LOG, EVENT_PROGRESS, EVENT_STATE,
 };
 use crate::paths::{validate_host_path, AppPaths};
 use crate::runner::progress::ProgressParser;
@@ -83,44 +83,61 @@ impl JobManager {
     pub fn submit(self: &Arc<Self>, spec: JobSpec) -> Result<String> {
         // 입력 게이트는 여기서 한 번만 통과시킨다. UNC 경로 등은 Runner 까지
         // 내려가기 전에 걸러야 사용자가 원인을 이해할 수 있다 (§5.4).
-        if spec.module.requires_output_dir() || !spec.output_dir.trim().is_empty() {
+        if spec.module().requires_output_dir() || !spec.output_dir.trim().is_empty() {
             validate_host_path(std::path::Path::new(&spec.output_dir))?;
         }
-        if spec.module.takes_input_dir() {
-            validate_host_path(std::path::Path::new(&spec.input_dir))?;
+        if let Some(dir) = spec.input_dir() {
+            validate_host_path(std::path::Path::new(dir))?;
         }
-        if spec.module == Module::AlleleCall {
-            if spec.schema_id.is_none() {
-                return Err(Error::InvalidInput("스키마를 선택하세요".into()));
-            }
-            if let Some(gl) = spec.loci_list.as_deref().filter(|s| !s.trim().is_empty()) {
-                validate_host_path(std::path::Path::new(gl))?;
-                let info = crate::commands::inspect_loci_list(gl.to_string())?;
-                if !info.looks_valid {
-                    return Err(Error::InvalidInput(format!(
-                        "loci 목록 파일이 아닙니다{}.\nExtractCgMLST 가 만든 cgMLSTschema*.txt 처럼 한 줄에 loci 이름 하나만 있는 파일을 선택하세요.",
-                        if info.tabbed { " (탭으로 나뉜 표입니다)" } else { " (비어 있습니다)" }
-                    )));
+
+        // 모듈별 게이트. 열거형을 쓰면 어떤 조합이 유효한지가 여기 한곳에 적힌다.
+        match &spec.params {
+            ModuleParams::CreateSchema {
+                schema_name, ptf, ..
+            } => {
+                if schema_name.trim().is_empty() {
+                    return Err(Error::InvalidInput("스키마 이름을 입력하세요".into()));
+                }
+                if let Some(p) = ptf.as_deref().filter(|s| !s.trim().is_empty()) {
+                    validate_host_path(std::path::Path::new(p))?;
                 }
             }
-        }
-        if spec.module == Module::ExtractCgMLST {
-            let file = spec.profiles_file.as_deref().unwrap_or("");
-            if file.trim().is_empty() {
-                return Err(Error::InvalidInput(
-                    "AlleleCall 결과 파일(results_alleles.tsv)을 선택하세요".into(),
-                ));
+            ModuleParams::AlleleCall {
+                schema_id,
+                loci_list,
+                ..
+            } => {
+                if schema_id.trim().is_empty() {
+                    return Err(Error::InvalidInput("스키마를 선택하세요".into()));
+                }
+                if let Some(gl) = loci_list.as_deref().filter(|s| !s.trim().is_empty()) {
+                    validate_host_path(std::path::Path::new(gl))?;
+                    let info = crate::commands::inspect_loci_list(gl.to_string())?;
+                    if !info.looks_valid {
+                        return Err(Error::InvalidInput(format!(
+                            "loci 목록 파일이 아닙니다{}.\nExtractCgMLST 가 만든 cgMLSTschema*.txt 처럼 한 줄에 loci 이름 하나만 있는 파일을 선택하세요.",
+                            if info.tabbed { " (탭으로 나뉜 표입니다)" } else { " (비어 있습니다)" }
+                        )));
+                    }
+                }
             }
-            validate_host_path(std::path::Path::new(file))?;
-            // 폼에서 이미 걸렀더라도 여기서 한 번 더 본다. 잘못된 표를 넣으면
-            // chewBBACA 가 거절하지 않고 각 행을 균주로 취급해 오래 헛돈다.
-            let info = crate::commands::inspect_profiles_file(file.to_string())?;
-            if !info.looks_valid {
-                return Err(Error::InvalidInput(format!(
-                    "이 파일은 AlleleCall 의 allelic profile 표가 아닙니다 (첫 열이 '{}', 열 {}개).\nAlleleCall 결과 폴더의 results_alleles.tsv 를 선택하세요.",
-                    info.first_column,
-                    info.loci + 1
-                )));
+            ModuleParams::ExtractCgMLST { profiles_file, .. } => {
+                if profiles_file.trim().is_empty() {
+                    return Err(Error::InvalidInput(
+                        "AlleleCall 결과 파일(results_alleles.tsv)을 선택하세요".into(),
+                    ));
+                }
+                validate_host_path(std::path::Path::new(profiles_file))?;
+                // 폼에서 이미 걸렀더라도 여기서 한 번 더 본다. 잘못된 표를 넣으면
+                // chewBBACA 가 거절하지 않고 각 행을 균주로 취급해 오래 헛돈다.
+                let info = crate::commands::inspect_profiles_file(profiles_file.clone())?;
+                if !info.looks_valid {
+                    return Err(Error::InvalidInput(format!(
+                        "이 파일은 AlleleCall 의 allelic profile 표가 아닙니다 (첫 열이 '{}', 열 {}개).\nAlleleCall 결과 폴더의 results_alleles.tsv 를 선택하세요.",
+                        info.first_column,
+                        info.loci + 1
+                    )));
+                }
             }
         }
 
@@ -128,7 +145,7 @@ impl JobManager {
         let log_path = self.paths.log_path(&job_id);
         let job = Job {
             job_id: job_id.clone(),
-            module: spec.module,
+            module: spec.module(),
             status: JobStatus::Queued,
             args: serde_json::to_string(&spec)?,
             created_at: now_iso(),
@@ -178,7 +195,13 @@ impl JobManager {
         let spec: JobSpec = match serde_json::from_str(&job.args) {
             Ok(s) => s,
             Err(e) => {
-                self.finalize(&job_id, JobStatus::Failed, None, Some(&format!("작업 인자를 해석할 수 없습니다: {e}")), None);
+                self.finalize(
+                    &job_id,
+                    JobStatus::Failed,
+                    None,
+                    Some(&format!("작업 인자를 해석할 수 없습니다: {e}")),
+                    None,
+                );
                 return;
             }
         };
@@ -192,7 +215,7 @@ impl JobManager {
         self.emit_state(&job_id, JobStatus::Running, None);
 
         // 진행률 단계표가 모듈마다 다르므로 여기서 모듈을 넘긴다 (progress.rs).
-        let sink = self.make_sink(&job_id, spec.module);
+        let sink = self.make_sink(&job_id, spec.module());
         let result = self.runner.run(&job_id, &spec, &sink);
 
         let cancelled = self
@@ -206,7 +229,13 @@ impl JobManager {
                 let _ = self.db.set_work_dir(&job_id, &outcome.work_dir);
 
                 if cancelled {
-                    self.finalize(&job_id, JobStatus::Cancelled, Some(outcome.exit_code), None, None);
+                    self.finalize(
+                        &job_id,
+                        JobStatus::Cancelled,
+                        Some(outcome.exit_code),
+                        None,
+                        None,
+                    );
                 } else if outcome.exit_code == 0 {
                     if let Some(created) = outcome.created_schema {
                         let info = SchemaInfo {
@@ -229,7 +258,13 @@ impl JobManager {
                         .clone()
                         .or_else(|| self.copy_log_to_output(&job_id, &spec.output_dir));
 
-                    self.finalize(&job_id, JobStatus::Completed, Some(0), None, landed.as_deref());
+                    self.finalize(
+                        &job_id,
+                        JobStatus::Completed,
+                        Some(0),
+                        None,
+                        landed.as_deref(),
+                    );
                     self.cleanup_if_configured(&job_id);
                 } else {
                     self.finalize(
@@ -347,11 +382,7 @@ impl JobManager {
     /// 그 값이 없다. 스키마 ID 는 작업 ID 와 이름만으로 결정되므로 다시 만들 수 있다.
     fn register_schema_from_disk(&self, job_id: &str, spec: &JobSpec) {
         let schema_id = crate::runner::schema_id_for(job_id, spec);
-        let name = spec
-            .schema_name
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .unwrap_or_else(|| schema_id.clone());
+        let name = crate::runner::schema_name_of(spec).to_string();
 
         match self.runner.inspect_schema_dir(&schema_id, &name) {
             Ok(created) => {
@@ -390,7 +421,11 @@ impl JobManager {
         }
         let dest_dir = std::path::Path::new(dir);
         if let Err(e) = std::fs::create_dir_all(dest_dir) {
-            self.log(job_id, LogStream::App, &format!("결과 폴더를 만들지 못했습니다: {e}"));
+            self.log(
+                job_id,
+                LogStream::App,
+                &format!("결과 폴더를 만들지 못했습니다: {e}"),
+            );
             return None;
         }
         let src = self.paths.log_path(job_id);
@@ -405,7 +440,11 @@ impl JobManager {
                 Some(dir.to_string())
             }
             Err(e) => {
-                self.log(job_id, LogStream::App, &format!("로그 사본을 만들지 못했습니다: {e}"));
+                self.log(
+                    job_id,
+                    LogStream::App,
+                    &format!("로그 사본을 만들지 못했습니다: {e}"),
+                );
                 None
             }
         }
@@ -452,7 +491,11 @@ impl JobManager {
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(job_id.to_string());
-                self.log(job_id, LogStream::App, "취소 요청 — 프로세스 그룹을 종료합니다");
+                self.log(
+                    job_id,
+                    LogStream::App,
+                    "취소 요청 — 프로세스 그룹을 종료합니다",
+                );
 
                 let handle = JobHandle {
                     job_id: job_id.to_string(),
@@ -602,7 +645,7 @@ impl JobManager {
                 // 디렉터리만 보고 복구하면서 **이름과 loci 수를 잃는다.**
                 if populated {
                     if let Some(s) = spec.as_ref() {
-                        if s.module == Module::CreateSchema {
+                        if s.module() == Module::CreateSchema {
                             me.register_schema_from_disk(&job_id, s);
                         }
                     }

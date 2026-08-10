@@ -51,12 +51,8 @@ pub fn run() {
             // 고르게 되고, 위쪽 코드는 바뀌지 않는다 (§9).
             let runner: Arc<dyn ChewieRunner> = Arc::new(WslRunner::new(settings.distro.clone()));
 
-            let manager = JobManager::new(
-                app.handle().clone(),
-                Arc::clone(&db),
-                runner,
-                paths.clone(),
-            );
+            let manager =
+                JobManager::new(app.handle().clone(), Arc::clone(&db), runner, paths.clone());
 
             // 조정(reconciliation)은 여기서 자동 실행하지 않는다. 살아 있는 작업을
             // 발견하면 사용자에게 "복구 / 종료" 를 물어야 하므로 UI 가 준비된 뒤

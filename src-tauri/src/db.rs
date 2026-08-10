@@ -116,8 +116,9 @@ impl Db {
 
     pub fn list_jobs(&self, limit: i64) -> Result<Vec<Job>> {
         let conn = self.lock();
-        let mut stmt =
-            conn.prepare(&format!("SELECT {COLUMNS} FROM jobs ORDER BY created_at DESC LIMIT ?1"))?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM jobs ORDER BY created_at DESC LIMIT ?1"
+        ))?;
         let rows = stmt.query_map([limit], row_to_job)?;
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
@@ -182,7 +183,14 @@ impl Db {
                 SET status = ?2, finished_at = ?3, exit_code = ?4, error = ?5,
                     output_path = COALESCE(?6, output_path)
               WHERE job_id = ?1",
-            params![job_id, status.as_str(), now_iso(), exit_code, error, output_path],
+            params![
+                job_id,
+                status.as_str(),
+                now_iso(),
+                exit_code,
+                error,
+                output_path
+            ],
         )?;
         Ok(())
     }

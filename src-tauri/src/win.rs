@@ -108,7 +108,13 @@ pub fn powershell(script: &str) -> Result<Captured> {
     );
     capture(
         command("powershell.exe")
-            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+            ])
             .arg(wrapped),
     )
 }
@@ -122,7 +128,10 @@ pub fn run_elevated(program: &str, args: &[&str]) -> Result<Captured> {
     let arg_list = if args.is_empty() {
         String::new()
     } else {
-        let quoted: Vec<String> = args.iter().map(|a| format!("'{}'", a.replace('\'', "''"))).collect();
+        let quoted: Vec<String> = args
+            .iter()
+            .map(|a| format!("'{}'", a.replace('\'', "''")))
+            .collect();
         format!(" -ArgumentList @({})", quoted.join(","))
     };
 
@@ -151,7 +160,10 @@ mod tests {
     #[test]
     fn decodes_utf16le_output() {
         // `wsl --list` 가 WSL_UTF8 없이 내보내는 형태.
-        let bytes: Vec<u8> = "Ubuntu".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        let bytes: Vec<u8> = "Ubuntu"
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
         assert_eq!(decode(&bytes), "Ubuntu");
     }
 

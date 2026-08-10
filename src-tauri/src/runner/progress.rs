@@ -30,29 +30,84 @@ const CREATE_SCHEMA: &[Stage] = &[
     ("renaming cdss for", 0.00, 0.05, "입력 CDS 정리 중"),
     ("identifying distinct cdss", 0.05, 0.05, "중복 CDS 제거 중"),
     ("translating", 0.10, 0.10, "CDS 번역 중"),
-    ("identifying distinct proteins", 0.20, 0.05, "중복 단백질 제거 중"),
+    (
+        "identifying distinct proteins",
+        0.20,
+        0.05,
+        "중복 단백질 제거 중",
+    ),
     ("clustering proteins", 0.25, 0.15, "단백질 클러스터링 중"),
-    ("performing all-vs-all blastp", 0.40, 0.35, "클러스터별 BLASTp 중"),
+    (
+        "performing all-vs-all blastp",
+        0.40,
+        0.35,
+        "클러스터별 BLASTp 중",
+    ),
     ("performing final blastp", 0.75, 0.20, "최종 BLASTp 중"),
     ("creating schema seed", 0.95, 0.04, "스키마 생성 중"),
 ];
 
 /// AlleleCall. 단계 수가 훨씬 많고, 무거운 곳은 대표 서열 정렬과 분류다.
 const ALLELE_CALL: &[Stage] = &[
-    ("determining allele size mode", 0.00, 0.03, "스키마 사전 계산 중"),
+    (
+        "determining allele size mode",
+        0.00,
+        0.03,
+        "스키마 사전 계산 중",
+    ),
     ("creating hash tables", 0.03, 0.04, "해시 테이블 생성 중"),
     ("renaming cdss for", 0.07, 0.03, "입력 CDS 정리 중"),
     ("identifying distinct cdss", 0.10, 0.03, "중복 CDS 제거 중"),
-    ("searching for cds exact matches", 0.13, 0.07, "CDS 정확 일치 검색 중"),
+    (
+        "searching for cds exact matches",
+        0.13,
+        0.07,
+        "CDS 정확 일치 검색 중",
+    ),
     ("translating", 0.20, 0.08, "CDS 번역 중"),
-    ("identifying distinct proteins", 0.28, 0.03, "중복 단백질 제거 중"),
-    ("searching for protein exact matches", 0.31, 0.06, "단백질 정확 일치 검색 중"),
-    ("determining blastp self-score", 0.37, 0.06, "self-score 계산 중"),
+    (
+        "identifying distinct proteins",
+        0.28,
+        0.03,
+        "중복 단백질 제거 중",
+    ),
+    (
+        "searching for protein exact matches",
+        0.31,
+        0.06,
+        "단백질 정확 일치 검색 중",
+    ),
+    (
+        "determining blastp self-score",
+        0.37,
+        0.06,
+        "self-score 계산 중",
+    ),
     ("clustering proteins", 0.43, 0.12, "단백질 클러스터링 중"),
-    ("aligning cluster representatives", 0.55, 0.25, "대표 서열 정렬 중"),
-    ("classifying high-scoring matches", 0.80, 0.12, "allele 분류 중"),
-    ("assigning allele identifiers", 0.92, 0.04, "allele 번호 부여 중"),
-    ("creating file with the allelic profiles", 0.96, 0.03, "결과 기록 중"),
+    (
+        "aligning cluster representatives",
+        0.55,
+        0.25,
+        "대표 서열 정렬 중",
+    ),
+    (
+        "classifying high-scoring matches",
+        0.80,
+        0.12,
+        "allele 분류 중",
+    ),
+    (
+        "assigning allele identifiers",
+        0.92,
+        0.04,
+        "allele 번호 부여 중",
+    ),
+    (
+        "creating file with the allelic profiles",
+        0.96,
+        0.03,
+        "결과 기록 중",
+    ),
 ];
 
 /// ExtractCgMLST. 임계값마다 같은 문구를 반복하고 진행률 막대가 없어 **거칠다.**
@@ -79,7 +134,9 @@ fn ratio_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     // "12/240", "[ 12/240 ]" 같은 형태. 앞뒤에 슬래시 경로가 붙는 경우를 피하려고
     // 숫자 양쪽에 경로 문자가 없는 경우만 잡는다.
-    RE.get_or_init(|| Regex::new(r"(?:^|[^\w/])(\d+)\s*/\s*(\d+)(?:[^\w/]|$)").expect("ratio regex"))
+    RE.get_or_init(|| {
+        Regex::new(r"(?:^|[^\w/])(\d+)\s*/\s*(\d+)(?:[^\w/]|$)").expect("ratio regex")
+    })
 }
 
 pub struct ProgressParser {

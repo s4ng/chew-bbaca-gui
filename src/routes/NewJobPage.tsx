@@ -172,20 +172,15 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     setError(null);
     setBusy(true);
     try {
-      const spec: JobSpec = {
-        module,
-        inputDir: module === "ExtractCgMLST" ? "" : inputDir,
-        outputDir,
-        // ExtractCgMLST 에는 --cds 개념이 없다.
-        cdsInput: module === "ExtractCgMLST" ? false : cdsInput,
-        schemaId: module === "AlleleCall" ? schemaId : null,
-        schemaName: module === "CreateSchema" ? schemaName : null,
-        ptf: module === "CreateSchema" && ptf ? ptf : null,
-        lociList: module === "AlleleCall" && lociList ? lociList : null,
-        cpu: cpu ? Number(cpu) : null,
-        profilesFile: module === "ExtractCgMLST" ? profilesFile : null,
-        thresholds: module === "ExtractCgMLST" && thresholds.trim() ? thresholds.trim() : null,
-      };
+      // 모듈마다 필요한 것만 담는다. 타입이 조합을 강제하므로, 예전처럼
+      // "이 모듈이면 이 값, 아니면 null" 을 줄줄이 쓸 필요가 없다.
+      const common = { outputDir, cpu: cpu ? Number(cpu) : null };
+      const spec: JobSpec =
+        module === "CreateSchema"
+          ? { ...common, module, inputDir, schemaName, ptf: ptf || null, cdsInput }
+          : module === "AlleleCall"
+            ? { ...common, module, inputDir, schemaId, lociList: lociList || null, cdsInput }
+            : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
       await jobsSubmit(spec);
       onSubmitted();
     } catch (e) {

@@ -105,9 +105,10 @@ pub fn probe(distro: &str) -> Result<EnvReport> {
             .messages
             .push("HypervisorPresent = False — 가상화가 동작하지 않습니다".into());
         if report.virtualization_firmware_enabled == Some(false) {
-            report
-                .messages
-                .push("VirtualizationFirmwareEnabled = False — 펌웨어에서 꺼져 있을 가능성이 큽니다".into());
+            report.messages.push(
+                "VirtualizationFirmwareEnabled = False — 펌웨어에서 꺼져 있을 가능성이 큽니다"
+                    .into(),
+            );
         }
         report.gate = Gate::BiosVirtualization;
         return Ok(report);
@@ -214,17 +215,29 @@ $cpu = Get-CimInstance Win32_Processor -ErrorAction SilentlyContinue | Select-Ob
 pub fn firmware_hint(manufacturer: Option<&str>) -> (&'static str, &'static str) {
     let m = manufacturer.unwrap_or("").to_ascii_lowercase();
     if m.contains("lenovo") {
-        ("F1 또는 Enter → F1", "Security → Virtualization → Intel VT-x / AMD-V")
+        (
+            "F1 또는 Enter → F1",
+            "Security → Virtualization → Intel VT-x / AMD-V",
+        )
     } else if m.contains("dell") {
         ("F2", "Virtualization Support → Virtualization")
     } else if m.contains("hp") || m.contains("hewlett") {
-        ("F10 (일부 기종 Esc → F10)", "Security → System Security → Virtualization Technology")
+        (
+            "F10 (일부 기종 Esc → F10)",
+            "Security → System Security → Virtualization Technology",
+        )
     } else if m.contains("asus") {
-        ("F2 또는 Del", "Advanced → CPU Configuration → Intel Virtualization Technology / SVM Mode")
+        (
+            "F2 또는 Del",
+            "Advanced → CPU Configuration → Intel Virtualization Technology / SVM Mode",
+        )
     } else if m.contains("gigabyte") {
         ("Del", "M.I.T. → Advanced Frequency → SVM Mode / Intel VT-x")
     } else if m.contains("msi") {
-        ("Del", "OC → CPU Features → Intel Virtualization Tech / SVM Mode")
+        (
+            "Del",
+            "OC → CPU Features → Intel Virtualization Tech / SVM Mode",
+        )
     } else if m.contains("samsung") {
         ("F2", "Advanced → Virtualization Technology")
     } else if m.contains("acer") {
