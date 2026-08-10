@@ -20,6 +20,8 @@ pub struct BackendArgs {
     pub loci_list: Option<String>,
     pub cds_input: bool,
     pub cpu: u32,
+    /// ExtractCgMLST 의 `--t`. 공백으로 구분된 임계값들. 비면 인자를 넣지 않는다.
+    pub thresholds: Option<String>,
 }
 
 /// `chewBBACA.py` 뒤에 붙는 인자 벡터를 만든다.
@@ -56,10 +58,29 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
                 v.push(gl.clone());
             }
         }
+        Module::ExtractCgMLST => {
+            // 입력이 폴더가 아니라 AlleleCall 결과 TSV 파일 하나다.
+            v.push("-i".into());
+            v.push(a.input.clone());
+            v.push("-o".into());
+            v.push(a.output.clone());
+            if let Some(t) = &a.thresholds {
+                // "0.95 0.99 1" 처럼 여러 값을 받는다 — 각각 별도 인자로 넘긴다.
+                let vals: Vec<&str> = t.split_whitespace().collect();
+                if !vals.is_empty() {
+                    v.push("--t".into());
+                    v.extend(vals.into_iter().map(String::from));
+                }
+            }
+        }
     }
 
-    v.push("--cpu".into());
-    v.push(a.cpu.to_string());
+    // `--cpu` 는 모든 모듈에 있는 인자가 아니다. ExtractCgMLST 에 붙이면
+    // argparse 가 "unrecognized arguments" 로 즉시 실패한다.
+    if !matches!(module, Module::ExtractCgMLST) {
+        v.push("--cpu".into());
+        v.push(a.cpu.to_string());
+    }
     v
 }
 
@@ -96,6 +117,32 @@ mod tests {
         let v = build_argv(Module::AlleleCall, &args());
         let g = v.iter().position(|x| x == "-g").unwrap();
         assert_eq!(v[g + 1], "/home/chewie/schemas/s1/schema_seed");
+    }
+
+    #[test]
+    fn extract_cgmlst_never_gets_cpu() {
+        // ExtractCgMLST 에는 --cpu 가 없다. 붙이면 argparse 가 즉시 실패한다.
+        let v = build_argv(Module::ExtractCgMLST, &args());
+        assert!(!v.contains(&"--cpu".to_string()), "{v:?}");
+        assert_eq!(v[1], "ExtractCgMLST");
+    }
+
+    #[test]
+    fn extract_cgmlst_passes_each_threshold_separately() {
+        let mut a = args();
+        a.thresholds = Some("0.95 0.99 1".into());
+        let v = build_argv(Module::ExtractCgMLST, &a);
+        let t = v.iter().position(|x| x == "--t").expect("--t 가 있어야 한다");
+        assert_eq!(&v[t + 1..t + 4], ["0.95", "0.99", "1"]);
+    }
+
+    #[test]
+    fn extract_cgmlst_omits_threshold_when_blank() {
+        // 비우면 chewBBACA 기본값(0.95/0.99/1)을 모두 계산하게 둔다.
+        let mut a = args();
+        a.thresholds = Some("   ".into());
+        let v = build_argv(Module::ExtractCgMLST, &a);
+        assert!(!v.contains(&"--t".to_string()), "{v:?}");
     }
 
     #[test]

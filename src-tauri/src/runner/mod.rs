@@ -51,6 +51,23 @@ pub struct RunOutcome {
     pub created_schema: Option<CreatedSchema>,
 }
 
+/// CreateSchema 가 만들 스키마의 ID. **작업 ID 와 이름만으로 결정된다.**
+///
+/// 실행할 때와 나중에 조정할 때가 같은 값을 얻어야 하므로 규칙을 한곳에 둔다.
+/// 러너 구현체가 바뀌어도 이 규칙은 그대로다.
+pub fn schema_id_for(job_id: &str, spec: &JobSpec) -> String {
+    let name = spec
+        .schema_name
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| format!("schema-{job_id}"));
+    format!(
+        "{}-{}",
+        crate::util::slugify(&name),
+        &job_id[..8.min(job_id.len())]
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct CreatedSchema {
     pub schema_id: String,
@@ -58,6 +75,46 @@ pub struct CreatedSchema {
     pub backend_path: String,
     pub ptf: Option<String>,
     pub loci_count: Option<i64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Module;
+
+    fn spec(name: Option<&str>) -> JobSpec {
+        JobSpec {
+            module: Module::CreateSchema,
+            input_dir: String::new(),
+            output_dir: String::new(),
+            schema_id: None,
+            schema_name: name.map(String::from),
+            ptf: None,
+            cds_input: false,
+            loci_list: None,
+            cpu: None,
+            profiles_file: None,
+            thresholds: None,
+        }
+    }
+
+    #[test]
+    fn schema_id_is_stable_for_the_same_job() {
+        // 실행할 때와 조정할 때가 같은 값을 얻어야 고아 작업의 산출물을 찾을 수 있다.
+        let job = "c8bb38f8-52ba-4450-adf5-99a88d9d0630";
+        let a = schema_id_for(job, &spec(Some("test123")));
+        let b = schema_id_for(job, &spec(Some("test123")));
+        assert_eq!(a, b);
+        assert_eq!(a, "test123-c8bb38f8");
+    }
+
+    #[test]
+    fn schema_id_falls_back_when_name_is_blank() {
+        let job = "abcd1234-0000-0000-0000-000000000000";
+        // 이름이 비면 작업 ID 로 만든다 — 폼이 막지만 방어한다.
+        assert!(schema_id_for(job, &spec(Some("   "))).starts_with("schema-"));
+        assert!(schema_id_for(job, &spec(None)).starts_with("schema-"));
+    }
 }
 
 /// 백엔드 준비 상태 요약. 온보딩 화면이 그대로 표시한다.
@@ -94,10 +151,20 @@ pub trait ChewieRunner: Send + Sync {
 
     /// 산출물이 실제로 만들어졌는지. 죽은 작업을 `completed` 로 확정할지
     /// `failed` 로 표시할지 가르는 유일한 근거다 (§6.3).
-    fn output_populated(&self, job_id: &str) -> Result<bool>;
+    ///
+    /// **`spec` 이 필요한 이유:** 산출물이 가는 곳이 모듈마다 다르다. CreateSchema 는
+    /// 작업 디렉터리가 아니라 스키마 저장소에 결과를 남기므로, 작업 디렉터리만 보면
+    /// 성공한 작업도 실패로 확정된다.
+    fn output_produced(&self, job_id: &str, spec: &JobSpec) -> Result<bool>;
 
     /// 앱이 소유하는 스키마 디렉터리 목록.
     fn list_schema_dirs(&self) -> Result<Vec<String>>;
+
+    /// 이미 있는 스키마 디렉터리를 조사한다 (loci 수, training file).
+    ///
+    /// 두 곳에서 쓴다 — 이어받은 작업이 끝났을 때의 등록, 그리고 DB 가 유실된 뒤의 복구.
+    /// 둘 다 `RunOutcome` 을 손에 쥐지 못한 상황이라 디렉터리를 직접 봐야 한다.
+    fn inspect_schema_dir(&self, schema_id: &str, name: &str) -> Result<CreatedSchema>;
 
     /// 스키마 ID → 백엔드 경로. DB 가 유실되어도 규칙으로 재구성할 수 있어야 한다.
     fn schema_path(&self, schema_id: &str) -> Result<String>;

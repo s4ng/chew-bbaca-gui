@@ -38,27 +38,50 @@ impl SchemaStore {
         let recorded = self.db.list_schemas()?;
 
         let mut result = Vec::new();
-        for info in recorded {
-            if dirs.contains(&info.schema_id) {
-                result.push(info);
-            } else {
+        for mut info in recorded {
+            if !dirs.contains(&info.schema_id) {
                 // 백엔드에 실체가 없는 항목은 목록에 남겨봐야 실행 시 실패할 뿐이다.
                 let _ = self.db.delete_schema(&info.schema_id);
+                continue;
             }
+            // loci 수가 비어 있으면 지금 채운다. 예전에 디렉터리만 보고 복구된 항목이나,
+            // 조사 시점에 아직 파일이 다 쓰이지 않았던 항목이 여기 해당한다.
+            if info.loci_count.is_none() {
+                if let Ok(found) = self
+                    .runner
+                    .inspect_schema_dir(&info.schema_id, &info.name)
+                {
+                    if found.loci_count.is_some() {
+                        info.loci_count = found.loci_count;
+                        info.ptf = found.ptf.or(info.ptf);
+                        if info.backend_path.is_empty() {
+                            info.backend_path = found.backend_path;
+                        }
+                        let _ = self.db.insert_schema(&info);
+                    }
+                }
+            }
+            result.push(info);
         }
 
         for dir in dirs {
             if result.iter().any(|s| s.schema_id == dir) {
                 continue;
             }
+            // 디렉터리만 남은 스키마. 표시 이름은 되살릴 수 없지만 loci 수와
+            // training file 은 디렉터리를 보면 알 수 있다 — 빈 채로 두지 않는다.
+            let probed = self.runner.inspect_schema_dir(&dir, &dir).ok();
             let recovered = SchemaInfo {
                 schema_id: dir.clone(),
                 name: dir.clone(),
                 created_at: now_iso(),
                 created_by_job: None,
-                backend_path: String::new(),
-                ptf: None,
-                loci_count: None,
+                backend_path: probed
+                    .as_ref()
+                    .map(|p| p.backend_path.clone())
+                    .unwrap_or_default(),
+                ptf: probed.as_ref().and_then(|p| p.ptf.clone()),
+                loci_count: probed.as_ref().and_then(|p| p.loci_count),
             };
             let _ = self.db.insert_schema(&recovered);
             result.push(recovered);

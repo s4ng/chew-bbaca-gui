@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::db::Db;
 use crate::env::probe::firmware_hint;
-use crate::env::{probe, DownloadProgress, EnvReport, Provisioner};
+use crate::env::{probe, DownloadProgress, EnvReport, Provisioner, RootfsOrigin};
 use crate::error::{Error, Result};
 use crate::jobs::JobManager;
 use crate::models::{Job, JobSpec, SchemaInfo};
@@ -28,6 +28,9 @@ pub struct AppState {
     pub db: Arc<Db>,
     pub paths: AppPaths,
     pub manager: Arc<JobManager>,
+    /// Tauri 리소스 디렉터리. 동봉된 rootfs 가 여기 들어 있다 (§8.1).
+    /// 개발 실행에서는 리소스가 복사되지 않으므로 파일이 없는 것이 정상이다.
+    pub resources: Option<PathBuf>,
 }
 
 impl AppState {
@@ -37,6 +40,7 @@ impl AppState {
 
     fn provisioner(&self) -> Provisioner {
         Provisioner::new(self.paths.clone(), self.settings().distro)
+            .with_resources(self.resources.clone())
     }
 
     fn schemas(&self) -> SchemaStore {
@@ -62,6 +66,19 @@ pub struct FirmwareHint {
     pub entry_key: String,
     pub menu_path: String,
     pub manufacturer: Option<String>,
+}
+
+/// ExtractCgMLST 입력 파일 진단 결과. 폼이 즉시 피드백하는 데 쓴다.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilesInfo {
+    /// 헤더를 뺀 행 수 = 균주 수
+    pub genomes: usize,
+    /// 첫 열을 뺀 열 수 = loci 수
+    pub loci: usize,
+    /// 첫 열의 머리말. AlleleCall 결과라면 `FILE` 이다.
+    pub first_column: String,
+    pub looks_valid: bool,
 }
 
 #[derive(Serialize)]
@@ -124,19 +141,37 @@ pub fn env_reboot_to_firmware(state: State<'_, AppState>) -> Result<()> {
     state.provisioner().reboot_to_firmware()
 }
 
-/// 배포판 게이트 ③ — rootfs 다운로드 → SHA256 검증 → `wsl --import`.
+/// rootfs 를 어디서 가져오게 되는지. UI 가 문구와 버튼을 이 값으로 고른다.
+#[tauri::command]
+pub fn env_rootfs_origin(state: State<'_, AppState>) -> RootfsOrigin {
+    state.provisioner().rootfs_origin(&state.settings().rootfs)
+}
+
+/// 배포판 게이트 ③ — rootfs 확보 → SHA256 검증 → `wsl --import`.
 ///
-/// 수백 MB 를 받는 동안 UI 를 막지 않도록 별도 스레드에서 돌리고 진행 상황은
+/// 동봉본이라도 500MB 해싱에 수 초가 걸리므로 별도 스레드에서 돌리고 진행 상황은
 /// `env://provision` 이벤트로 보낸다.
 #[tauri::command]
 pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
     let settings = state.settings();
-    if !settings.rootfs_ready() {
+    let provisioner = state.provisioner();
+    let origin = provisioner.rootfs_origin(&settings.rootfs);
+
+    if origin == RootfsOrigin::Missing {
+        return Err(Error::Other(format!(
+            "설치할 rootfs 이미지를 찾을 수 없습니다.\n인스톨러로 설치한 앱이라면 다시 설치해 주세요. 개발 중이라면 설정 화면의 [rootfs 이미지] 칸에 직접 빌드한 {} 경로를 넣으세요.",
+            settings.rootfs.file_name
+        )));
+    }
+    if !settings.checksum_looks_valid() {
         return Err(Error::Other(
-            "rootfs 배포 정보가 아직 설정되지 않았습니다. 설정 화면에서 URL 과 SHA256 을 입력하거나 릴리스를 기다려 주세요.".into(),
+            "설정의 SHA256 값이 64자리 16진수가 아닙니다. 설정 화면에서 체크섬을 확인해 주세요.".into(),
         ));
     }
-    let provisioner = state.provisioner();
+
+    // 동봉본·로컬 파일은 받지 않고 해싱만 한다. 첫 이벤트 문구가 다르면
+    // 사용자가 "왜 다운로드가 안 끝나지" 라고 오해한다.
+    let downloading = origin == RootfsOrigin::Remote;
     let source = settings.rootfs.clone();
 
     std::thread::spawn(move || {
@@ -152,7 +187,15 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
             );
         };
 
-        emit("download", "rootfs 다운로드를 시작합니다".into(), Some(0.0), None);
+        // 다운로드 단계와 검증 단계는 같은 진행률 콜백을 쓴다 (둘 다 바이트 단위 진행).
+        let stage = if downloading { "download" } else { "verify" };
+        let first = if downloading {
+            "rootfs 다운로드를 시작합니다"
+        } else {
+            "포함된 이미지를 검증합니다"
+        };
+        emit(stage, first.into(), Some(0.0), None);
+
         let on_progress = |p: DownloadProgress| {
             let fraction = p.total.map(|t| p.received as f32 / t.max(1) as f32);
             let mb = p.received / (1024 * 1024);
@@ -164,7 +207,7 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
             let _ = app.emit(
                 EVENT_PROVISION,
                 ProvisionEvent {
-                    stage: "download",
+                    stage,
                     message,
                     fraction,
                     ok: None,
@@ -175,7 +218,7 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
         let tarball = match provisioner.download_rootfs(&source, &on_progress) {
             Ok(p) => p,
             Err(e) => {
-                emit("download", e.to_string(), None, Some(false));
+                emit(stage, e.to_string(), None, Some(false));
                 return;
             }
         };
@@ -254,6 +297,12 @@ pub fn jobs_reconcile(state: State<'_, AppState>) -> Result<Vec<Job>> {
     state.manager.reconcile()
 }
 
+/// 이어받은 작업 중 아직 실행 중인 것. 조정과 달리 **몇 번이고 물어도 된다.**
+#[tauri::command]
+pub fn jobs_adopted(state: State<'_, AppState>) -> Result<Vec<Job>> {
+    state.manager.adopted_jobs()
+}
+
 // ================================================================ 스키마
 
 #[tauri::command]
@@ -323,10 +372,162 @@ pub fn inspect_input_dir(path: String) -> Result<InputDirInfo> {
     })
 }
 
+/// 따라해보기 가이드를 앱 폴더에 꺼내 기본 브라우저로 연다.
+///
+/// 문서와 스크린샷이 **바이너리에 묻어서 나가므로 인터넷이 없어도** 열린다.
+/// Tauri 리소스로 동봉하지 않는 이유는 개발 실행에서는 리소스가 복사되지 않아
+/// 경로가 갈리기 때문이다. 매번 덮어써서 앱을 새로 깔면 문서도 함께 갱신된다.
+///
+/// **여는 것까지 Rust 가 한다.** 프런트에서 `openPath` 를 부르면 열리지 않는다 —
+/// `opener:allow-open-path` 는 "스코프 없이 명령만 허용"이라 어떤 경로도 통과하지
+/// 못하기 때문이다. 우리가 방금 쓴 파일을 우리가 여는 것이므로 여기서 처리한다.
+#[tauri::command]
+pub fn guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let path = write_guide(&state)?;
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| {
+            Error::Other(format!(
+                "가이드를 열지 못했습니다: {e}\n파일은 여기 있습니다: {}",
+                path.display()
+            ))
+        })?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 가이드 파일 일습을 앱 폴더에 풀고 HTML 경로를 돌려준다.
+fn write_guide(state: &State<'_, AppState>) -> Result<PathBuf> {
+    // (파일명, 내용) — 스크린샷은 HTML 이 상대 경로로 참조하므로 같은 폴더에 푼다.
+    const HTML: &str = include_str!("../guide/guide.html");
+    const SHOTS: [(&str, &[u8]); 3] = [
+        ("01-new-job.png", include_bytes!("../guide/01-new-job.png")),
+        (
+            "02-job-running.png",
+            include_bytes!("../guide/02-job-running.png"),
+        ),
+        ("03-schemas.png", include_bytes!("../guide/03-schemas.png")),
+    ];
+
+    let dir = state.paths.root.join("guide");
+    std::fs::create_dir_all(&dir)?;
+    for (name, bytes) in SHOTS {
+        std::fs::write(dir.join(name), bytes)?;
+    }
+    let path = dir.join("따라해보기.html");
+    std::fs::write(&path, HTML)?;
+    Ok(path)
+}
+
+/// AlleleCall 결과 표인지 확인한다 (ExtractCgMLST 입력 게이트).
+///
+/// AlleleCall 결과 폴더에는 TSV 가 일곱 개 들어 있고 확장자만으로는 구별되지 않는다.
+/// 엉뚱한 것을 넣어도 chewBBACA 는 **거절하지 않고** 각 행을 균주로 취급해 한참을
+/// 돌다가 쓸모없는 결과를 낸다 (`cds_coordinates.tsv` 로 64,217 행을 도는 사례가 있었다).
+/// 그래서 제출 전에 여기서 거른다 — 40분 뒤에 알게 되는 일이 없어야 한다 (§5.4).
+#[tauri::command]
+pub fn inspect_profiles_file(path: String) -> Result<ProfilesInfo> {
+    use std::io::BufRead;
+
+    let file = Path::new(&path);
+    crate::paths::validate_host_path(file)?;
+    if !file.is_file() {
+        return Err(Error::InvalidInput("파일을 찾을 수 없습니다".into()));
+    }
+
+    let handle = std::fs::File::open(file)?;
+    let mut reader = std::io::BufReader::new(handle);
+
+    let mut header = String::new();
+    reader.read_line(&mut header)?;
+    let columns = header.trim_end().split('\t').count();
+    let first_column = header
+        .split('\t')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    // 헤더를 뺀 나머지가 균주 수다. 4MB 짜리 오답 파일도 순식간에 세어진다.
+    let rows = reader.lines().map_while(std::result::Result::ok).count();
+
+    // AlleleCall 결과는 첫 칸이 `FILE` 이고 loci 마다 열이 하나씩 붙는다.
+    // 열이 한 자릿수면 프로파일 표일 수 없다.
+    let looks_valid = first_column.eq_ignore_ascii_case("FILE") && columns > 10;
+
+    Ok(ProfilesInfo {
+        genomes: rows,
+        loci: columns.saturating_sub(1),
+        first_column,
+        looks_valid,
+    })
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InputDirInfo {
     pub path: String,
     pub total_files: usize,
     pub fasta_files: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    /// 헤더 한 줄과 데이터 `rows` 줄짜리 TSV 를 임시로 만든다.
+    fn write_tsv(name: &str, header: &str, rows: usize) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("chewie-gate-{name}"));
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(f, "{header}").unwrap();
+        let cols = header.split('\t').count();
+        for i in 0..rows {
+            let line: Vec<String> = (0..cols).map(|c| format!("v{i}_{c}")).collect();
+            writeln!(f, "{}", line.join("\t")).unwrap();
+        }
+        path
+    }
+
+    #[test]
+    fn allelic_profile_table_is_accepted() {
+        // results_alleles.tsv 모양 — 첫 열 FILE, loci 마다 열 하나, 균주마다 행 하나.
+        let header = std::iter::once("FILE".to_string())
+            .chain((1..=40).map(|i| format!("locus{i}")))
+            .collect::<Vec<_>>()
+            .join("\t");
+        let path = write_tsv("alleles.tsv", &header, 32);
+
+        let info = inspect_profiles_file(path.to_string_lossy().to_string()).unwrap();
+        assert!(info.looks_valid);
+        assert_eq!(info.genomes, 32);
+        assert_eq!(info.loci, 40);
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn cds_coordinates_table_is_rejected() {
+        // 실제로 물렸던 파일의 모양. 이걸 통과시키면 64,217 행을 도는 사고가 재현된다.
+        let path = write_tsv(
+            "coords.tsv",
+            "Genome\tContig\tStart\tStop\tProtein_ID\tCoding_Strand",
+            500,
+        );
+        let info = inspect_profiles_file(path.to_string_lossy().to_string()).unwrap();
+        assert!(!info.looks_valid, "이 표는 거절해야 한다");
+        assert_eq!(info.first_column, "Genome");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_table_with_too_few_columns_is_rejected() {
+        // 첫 열이 FILE 이어도 열이 한 자릿수면 프로파일 표일 수 없다.
+        let path = write_tsv("tiny.tsv", "FILE\ta\tb", 3);
+        let info = inspect_profiles_file(path.to_string_lossy().to_string()).unwrap();
+        assert!(!info.looks_valid);
+        let _ = std::fs::remove_file(path);
+    }
 }

@@ -61,7 +61,16 @@ pub fn run() {
             // 조정(reconciliation)은 여기서 자동 실행하지 않는다. 살아 있는 작업을
             // 발견하면 사용자에게 "복구 / 종료" 를 물어야 하므로 UI 가 준비된 뒤
             // `jobs_reconcile` 로 호출한다 (§6.3).
-            app.manage(AppState { db, paths, manager });
+            // rootfs 는 인스톨러에 동봉되어 리소스 디렉터리에 놓인다 (§8.1).
+            // 개발 실행에서는 리소스가 복사되지 않으므로 없는 것이 정상이다.
+            let resources = app.path().resource_dir().ok();
+
+            app.manage(AppState {
+                db,
+                paths,
+                manager,
+                resources,
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -71,6 +80,7 @@ pub fn run() {
             commands::env_manual_commands,
             commands::env_firmware_hint,
             commands::env_reboot_to_firmware,
+            commands::env_rootfs_origin,
             commands::env_provision,
             commands::env_unregister,
             commands::disk_compact,
@@ -81,12 +91,15 @@ pub fn run() {
             commands::jobs_cancel,
             commands::jobs_log,
             commands::jobs_reconcile,
+            commands::jobs_adopted,
             commands::schemas_list,
             commands::schemas_delete,
             commands::schemas_export,
             commands::settings_get,
             commands::settings_set,
             commands::inspect_input_dir,
+            commands::inspect_profiles_file,
+            commands::guide_open,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 애플리케이션을 시작하지 못했습니다");

@@ -19,13 +19,34 @@ use crate::models::{JobSpec, Module};
 use crate::paths::validate_host_path;
 use crate::runner::cli::{build_argv, BackendArgs};
 use crate::runner::{
-    BackendStatus, ChewieRunner, CreatedSchema, EventSink, JobHandle, RunEvent, RunOutcome,
+    schema_id_for, BackendStatus, ChewieRunner, CreatedSchema, EventSink, JobHandle, RunEvent,
+    RunOutcome,
 };
-use crate::util::{sh_quote, slugify};
+use crate::util::sh_quote;
 use crate::win;
 
 /// PGID 를 stdout 으로 실어 보내기 위한 표식. 이 줄은 로그에 노출하지 않는다.
 const PGID_MARKER: &str = "__CHEWIE_PGID__";
+
+/// 작업 디렉터리 안의 실행 로그. chewBBACA 는 앱의 파이프가 아니라 **이 파일**에 쓴다.
+/// 앱이 죽어도 쓰기 대상이 사라지지 않아야 작업이 살아남는다 (§6.3).
+const RUN_LOG: &str = "run.log";
+
+/// `wsl.exe` 에 명령을 넘기는 방식. **`--` 로 바꾸지 마라.**
+///
+/// `wsl.exe -d <distro> -- <명령>` 은 명령줄을 배포판의 **기본 셸에 한 번 더 파싱**시킨다.
+/// 그 재파싱이 우리가 붙인 인용부호를 먹어버려서, 공백·한글이 든 경로가 조각나고
+/// `export CHEWIE_CMD='...'` 같은 문장이 통째로 무력화된다.
+///
+/// 증상이 고약하다 — **실패하지 않고 조용히 아무것도 하지 않는다.** 2026-08-10 에
+/// CreateSchema 가 출력 한 줄 없이 exit 0 으로 끝나고 스키마도 안 생기는 것으로 드러났다.
+/// `-e` 는 셸을 거치지 않고 곧바로 exec 하므로 argv 경계와 인용이 그대로 보존된다.
+const EXEC_FLAG: &str = "-e";
+
+/// 로그인 셸로 스크립트 하나를 실행하는 argv. `-l` 은 micromamba 활성화용이다(§8.2).
+fn login_shell_argv(script: &str) -> [&str; 4] {
+    [EXEC_FLAG, "bash", "-lc", script]
+}
 
 pub struct WslRunner {
     distro: String,
@@ -55,9 +76,13 @@ impl WslRunner {
     }
 
     /// 배포판 안에서 프로그램 하나를 직접 실행하고 결과를 모은다.
+    ///
+    /// `exec()` 로 부르는 것은 **coreutils 로 한정한다** (`printenv`, `cp` 등).
+    /// 로그인 셸을 거치지 않으므로 `/opt/conda/bin` 이 PATH 에 없어 `chewBBACA.py`
+    /// 나 `python3` 는 찾지 못한다.
     fn exec(&self, argv: &[&str]) -> Result<win::Captured> {
         let mut cmd = self.base();
-        cmd.arg("-e");
+        cmd.arg(EXEC_FLAG);
         cmd.args(argv);
         win::capture(&mut cmd)
     }
@@ -68,7 +93,7 @@ impl WslRunner {
     /// 활성화가 안 되면 `chewBBACA.py` 를 찾지 못한다.
     fn bash(&self, script: &str) -> Result<win::Captured> {
         let mut cmd = self.base();
-        cmd.args(["--", "bash", "-lc", script]);
+        cmd.args(login_shell_argv(script));
         win::capture(&mut cmd)
     }
 
@@ -118,11 +143,46 @@ impl WslRunner {
         Ok(())
     }
 
+    /// 파일 하나만 ext4 로 복사한다 (ExtractCgMLST 처럼 입력이 파일인 모듈용).
+    ///
+    /// 폴더째 복사할 이유가 없다 — `results_alleles.tsv` 옆에는 수 MB 짜리
+    /// `cds_coordinates.tsv` 가 같이 있고, 그건 이 모듈이 읽지 않는다.
+    /// 반환값은 복사된 파일의 백엔드 경로다.
+    fn stage_file(&self, work: &str, src_backend: &str, sink: &EventSink) -> Result<String> {
+        sink(RunEvent::Notice(
+            "입력 파일을 WSL 내부(ext4)로 복사하는 중...".into(),
+        ));
+        let script = format!(
+            "set -e
+             rm -rf {work}/input
+             mkdir -p {work}/input {work}/output
+             cp -a {src} {work}/input/
+             basename {src}",
+            work = sh_quote(work),
+            src = sh_quote(src_backend),
+        );
+        let out = self.bash(&script)?.require_success()?;
+        let name = out.stdout.trim().to_string();
+        if name.is_empty() {
+            return Err(Error::Other(
+                "입력 파일 이름을 확인하지 못했습니다".into(),
+            ));
+        }
+        sink(RunEvent::Notice(format!("입력 파일 준비 완료: {name}")));
+        Ok(format!("{work}/input/{name}"))
+    }
+
     /// 실행 스크립트. 반환값의 종료 코드는 chewBBACA 자신의 것이다.
     ///
     /// `setsid --wait` 가 두 가지를 동시에 해준다 —
     /// 새 세션(=새 프로세스 그룹) 생성, 그리고 자식 종료 코드 전달.
     /// 내부 bash 의 `$$` 가 곧 PGID 이므로 그 값을 표식과 함께 먼저 출력한다.
+    ///
+    /// **chewBBACA 의 출력은 앱의 파이프가 아니라 파일로 간다.** 이게 §6.3("작업은
+    /// 앱보다 오래 산다")의 실제 조건이다. 앱이 닫히면 stdout 파이프가 닫히고, 거기에
+    /// 쓰던 프로세스는 SIGPIPE 로 죽는다 — `setsid` 로 프로세스 그룹을 분리해도
+    /// 출력 대상이 앱의 파이프면 소용이 없다(2026-08-10 에 실측으로 확인했다).
+    /// 파일에 쓰게 하고 `tail` 로 중계하면, 앱이 죽어도 죽는 것은 `tail` 뿐이다.
     fn spawn_and_stream(&self, work: &str, argv: &[String], sink: &EventSink) -> Result<i32> {
         let command_line = argv
             .iter()
@@ -130,19 +190,27 @@ impl WslRunner {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // `tail --pid` 는 그 프로세스가 끝나면 **남은 내용을 흘린 뒤** 스스로 끝난다.
+        // 직접 kill 하면 마지막 몇 줄(요약 표, "Finished at")을 놓친다.
         let script = format!(
             "set -o pipefail
              export PYTHONUNBUFFERED=1
              cd {work}
              export CHEWIE_CMD={cmd}
-             setsid --wait bash -c 'echo \"{marker} $$\"; eval \"$CHEWIE_CMD\"'",
+             LOG={work}/{log}
+             : > \"$LOG\"
+             setsid --wait bash -c 'echo \"{marker} $$\"; eval \"$CHEWIE_CMD\"' >> \"$LOG\" 2>&1 &
+             CHILD=$!
+             tail -n +1 -f --pid=\"$CHILD\" \"$LOG\"
+             wait \"$CHILD\"",
             work = sh_quote(work),
             cmd = sh_quote(&command_line),
             marker = PGID_MARKER,
+            log = RUN_LOG,
         );
 
         let mut cmd = self.base();
-        cmd.args(["--", "bash", "-lc", script.as_str()])
+        cmd.args(login_shell_argv(script.as_str()))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -181,9 +249,11 @@ impl WslRunner {
 
     /// CreateSchema 직후 스키마 디렉터리를 조사한다.
     fn inspect_schema(&self, schema_id: &str, name: &str, path: &str) -> Result<CreatedSchema> {
+        // `.trn` 은 스키마 루트가 아니라 `schema_seed/` 안에 놓인다 (3.5.4 에서 확인).
+        // 루트도 함께 보는 것은 다른 버전이나 PrepExternalSchema 산출물을 대비한 것이다.
         let script = format!(
             "set -e
-             ls -1 {p}/*.trn 2>/dev/null | head -n 1 || true
+             ls -1 {p}/*.trn {p}/schema_seed/*.trn 2>/dev/null | head -n 1 || true
              echo '---'
              ls -1 {p}/schema_seed/*.fasta 2>/dev/null | wc -l",
             p = sh_quote(path)
@@ -281,12 +351,30 @@ impl ChewieRunner for WslRunner {
     }
 
     fn run(&self, job_id: &str, spec: &JobSpec, sink: &EventSink) -> Result<RunOutcome> {
-        validate_host_path(Path::new(&spec.input_dir))?;
-        validate_host_path(Path::new(&spec.output_dir))?;
+        // CreateSchema 는 결과 폴더가 선택이라 비어 있을 수 있다.
+        if !spec.output_dir.trim().is_empty() {
+            validate_host_path(Path::new(&spec.output_dir))?;
+        }
 
         let work = self.work_dir(job_id)?;
-        let input_backend = self.to_backend_path(Path::new(&spec.input_dir))?;
-        self.stage_input(&work, &input_backend, sink)?;
+
+        // 입력 모양이 모듈마다 다르다 — 어셈블리 폴더이거나, TSV 파일 하나이거나.
+        let staged_input = if spec.module.takes_input_dir() {
+            validate_host_path(Path::new(&spec.input_dir))?;
+            let input_backend = self.to_backend_path(Path::new(&spec.input_dir))?;
+            self.stage_input(&work, &input_backend, sink)?;
+            format!("{work}/input")
+        } else {
+            let file = spec.profiles_file.as_deref().ok_or_else(|| {
+                Error::InvalidInput(
+                    "ExtractCgMLST 에는 AlleleCall 결과 파일(results_alleles.tsv)이 필요합니다"
+                        .into(),
+                )
+            })?;
+            validate_host_path(Path::new(file))?;
+            let src = self.to_backend_path(Path::new(file))?;
+            self.stage_file(&work, &src, sink)?
+        };
 
         let cpu = match spec.cpu {
             Some(n) if n > 0 => n,
@@ -295,16 +383,19 @@ impl ChewieRunner for WslRunner {
         };
 
         let mut args = BackendArgs {
-            input: format!("{work}/input"),
+            // 폴더 모듈은 `{work}/input`, 파일 모듈은 복사된 파일의 경로가 들어온다.
+            input: staged_input,
             output: format!("{work}/output"),
             cds_input: spec.cds_input,
             cpu,
+            thresholds: spec.thresholds.clone(),
             ..Default::default()
         };
 
         // 모듈별로 산출물이 가는 곳이 다르다.
-        //  - CreateSchema: 스키마는 앱이 소유하므로 ~/schemas 로 직접 만든다 (§4.4)
-        //  - AlleleCall:   결과는 사용자 것이므로 work/output 을 거쳐 회수한다
+        //  - CreateSchema:  스키마는 앱이 소유하므로 ~/schemas 로 직접 만든다 (§4.4)
+        //  - AlleleCall:    결과는 사용자 것이므로 work/output 을 거쳐 회수한다
+        //  - ExtractCgMLST: 마찬가지로 회수한다 (cgMLSTschema*.txt 가 다음 실행의 입력이 된다)
         let mut created_schema_target: Option<(String, String)> = None;
         match spec.module {
             Module::CreateSchema => {
@@ -313,7 +404,8 @@ impl ChewieRunner for WslRunner {
                     .clone()
                     .filter(|s| !s.trim().is_empty())
                     .unwrap_or_else(|| format!("schema-{job_id}"));
-                let schema_id = format!("{}-{}", slugify(&name), &job_id[..8.min(job_id.len())]);
+                // 조정(reconciliation)이 같은 값을 다시 만들어야 하므로 규칙은 공용이다.
+                let schema_id = schema_id_for(job_id, spec);
                 let path = format!("{}/{}", self.schema_root()?, schema_id);
                 args.output = path.clone();
                 if let Some(ptf) = &spec.ptf {
@@ -330,6 +422,8 @@ impl ChewieRunner for WslRunner {
                     args.loci_list = Some(self.to_backend_path(Path::new(gl))?);
                 }
             }
+            // 스키마도 어셈블리도 필요 없다. 입력 TSV 는 위에서 이미 스테이징했다.
+            Module::ExtractCgMLST => {}
         }
 
         let argv = build_argv(spec.module, &args);
@@ -392,12 +486,20 @@ impl ChewieRunner for WslRunner {
         Ok(out.stdout.trim() == "alive")
     }
 
-    fn output_populated(&self, job_id: &str) -> Result<bool> {
-        let work = self.work_dir(job_id)?;
-        let out = self.bash(&format!(
-            "ls -A {}/output 2>/dev/null | head -n 1",
-            sh_quote(&work)
-        ))?;
+    fn output_produced(&self, job_id: &str, spec: &JobSpec) -> Result<bool> {
+        // CreateSchema 의 산출물은 작업 디렉터리가 아니라 스키마 저장소에 있다.
+        // 여기를 작업 디렉터리로 보면 성공한 고아 작업이 전부 실패로 확정된다.
+        let target = if spec.module == Module::CreateSchema {
+            format!(
+                "{}/{}/schema_seed",
+                self.schema_root()?,
+                schema_id_for(job_id, spec)
+            )
+        } else {
+            format!("{}/output", self.work_dir(job_id)?)
+        };
+
+        let out = self.bash(&format!("ls -A {} 2>/dev/null | head -n 1", sh_quote(&target)))?;
         Ok(!out.stdout.trim().is_empty())
     }
 
@@ -417,6 +519,11 @@ impl ChewieRunner for WslRunner {
 
     fn schema_path(&self, schema_id: &str) -> Result<String> {
         Ok(format!("{}/{}", self.schema_root()?, schema_id))
+    }
+
+    fn inspect_schema_dir(&self, schema_id: &str, name: &str) -> Result<CreatedSchema> {
+        let path = format!("{}/{}", self.schema_root()?, schema_id);
+        self.inspect_schema(schema_id, name, &path)
     }
 
     fn remove_schema(&self, schema_id: &str) -> Result<()> {
@@ -498,5 +605,26 @@ fn pump<R: Read>(reader: R, sink: &EventSink, is_stderr: bool) {
     }
     if !acc.is_empty() {
         emit(&acc);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn login_shell_never_uses_the_double_dash_separator() {
+        // `--` 로 되돌리면 배포판 기본 셸이 스크립트를 한 번 더 파싱해 인용부호를 먹는다.
+        // 그러면 실패하지 않고 **조용히 아무것도 하지 않는다** — 회귀를 여기서 막는다.
+        let argv = login_shell_argv("echo hi");
+        assert_eq!(argv[0], "-e", "wsl.exe 는 -e 로 직접 exec 해야 한다");
+        assert_ne!(argv[0], "--");
+        assert_eq!(argv[1..], ["bash", "-lc", "echo hi"]);
+    }
+
+    #[test]
+    fn login_shell_keeps_the_l_flag() {
+        // `-l` 이 빠지면 micromamba 가 활성화되지 않아 chewBBACA.py 를 못 찾는다 (§8.2).
+        assert!(login_shell_argv("x").contains(&"-lc"));
     }
 }

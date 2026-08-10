@@ -8,12 +8,15 @@ use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------- 모듈
 
-/// GUI 가 노출하는 chewBBACA 모듈. v0.1 범위는 두 개다 (§10).
+/// GUI 가 노출하는 chewBBACA 모듈 (§10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Module {
     CreateSchema,
     AlleleCall,
+    /// AlleleCall 결과에서 core genome 을 추린다. 입력이 **어셈블리 폴더가 아니라
+    /// TSV 파일 하나**라 다른 두 모듈과 입력 모양이 다르다.
+    ExtractCgMLST,
 }
 
 impl Module {
@@ -22,6 +25,7 @@ impl Module {
         match self {
             Module::CreateSchema => "CreateSchema",
             Module::AlleleCall => "AlleleCall",
+            Module::ExtractCgMLST => "ExtractCgMLST",
         }
     }
 
@@ -29,8 +33,23 @@ impl Module {
         match s {
             "CreateSchema" => Some(Module::CreateSchema),
             "AlleleCall" => Some(Module::AlleleCall),
+            "ExtractCgMLST" => Some(Module::ExtractCgMLST),
             _ => None,
         }
+    }
+
+    /// 어셈블리 폴더를 입력으로 받는가. `false` 면 파일 하나만 스테이징한다.
+    pub fn takes_input_dir(self) -> bool {
+        !matches!(self, Module::ExtractCgMLST)
+    }
+
+    /// 결과 폴더가 반드시 있어야 하는가.
+    ///
+    /// CreateSchema 는 산출물인 스키마를 앱 저장소에 넣으므로 회수할 것이 없다.
+    /// 그런데도 폴더를 필수로 받으면 사용자는 **빈 폴더를 열어보고 실패했다고 생각한다.**
+    /// 그래서 선택으로 두고, 지정한 경우에만 실행 로그 사본을 남긴다.
+    pub fn requires_output_dir(self) -> bool {
+        !matches!(self, Module::CreateSchema)
     }
 }
 
@@ -100,6 +119,13 @@ pub struct JobSpec {
     pub loci_list: Option<String>,
     /// 미지정 시 WSL 내부 `nproc` 값을 사용한다 (§6.4)
     pub cpu: Option<u32>,
+    /// ExtractCgMLST 입력: AlleleCall 이 만든 `results_alleles.tsv` (Windows 경로).
+    /// 이 모듈은 `input_dir` 을 쓰지 않는다.
+    #[serde(default)]
+    pub profiles_file: Option<String>,
+    /// ExtractCgMLST 의 `--t`. 비우면 chewBBACA 기본값(0.95 / 0.99 / 1)을 모두 계산한다.
+    #[serde(default)]
+    pub thresholds: Option<String>,
 }
 
 /// SQLite `jobs` 한 행. UI 목록/상세가 그대로 사용한다.
