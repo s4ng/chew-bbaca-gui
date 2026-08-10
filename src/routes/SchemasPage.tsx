@@ -3,13 +3,15 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { formatTime } from "../lib/format";
-import { schemasDelete, schemasExport, schemasList } from "../lib/ipc";
+import { schemasDelete, schemasExport, schemasImport, schemasList } from "../lib/ipc";
 import { asAppError, type SchemaInfo } from "../lib/types";
 
 export default function SchemasPage() {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -35,6 +37,37 @@ export default function SchemasPage() {
       setError(asAppError(e).message);
     } finally {
       setBusy(null);
+    }
+  };
+
+  /**
+   * 내보낸 폴더를 되돌린다. 이름을 따로 묻는 이유는 폴더 이름에서 표시 이름을
+   * 복원할 수 없기 때문이다 — 내보내기가 폴더 *내용*만 복사하기 때문.
+   */
+  const importSchema = async () => {
+    const dir = await open({ directory: true, multiple: false });
+    if (typeof dir !== "string") return;
+
+    const suggested = dir.split(/[\\/]/).filter(Boolean).pop() ?? "가져온 스키마";
+    const name = window.prompt(
+      "이 스키마를 무엇으로 부를까요?\n(목록에 표시될 이름입니다)",
+      suggested,
+    );
+    if (name === null) return;
+
+    setImporting(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const info = await schemasImport(dir, name);
+      setMessage(
+        `'${info.name}' 를 가져왔습니다${info.lociCount ? ` (loci ${info.lociCount})` : ""}.`,
+      );
+      await refresh();
+    } catch (e) {
+      setError(asAppError(e).message);
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -64,14 +97,23 @@ export default function SchemasPage() {
             추가하기 때문에, Windows 폴더에 두면 실행할 때마다 파일시스템 오버헤드가 쌓입니다.
           </p>
         </div>
-        <button onClick={() => void refresh()}>새로 고침</button>
+        <div className="row">
+          <button disabled={importing} onClick={() => void importSchema()}>
+            {importing ? "가져오는 중..." : "불러오기"}
+          </button>
+          <button onClick={() => void refresh()}>새로 고침</button>
+        </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
+      {message && <div className="banner info">{message}</div>}
 
       {schemas.length === 0 ? (
         <div className="empty">
           <p>아직 스키마가 없습니다. [새 작업] → CreateSchema 로 만들 수 있습니다.</p>
+          <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
+            전에 [내보내기] 로 빼둔 폴더가 있다면 [불러오기] 로 되돌릴 수 있습니다.
+          </p>
         </div>
       ) : (
         <div className="stack">

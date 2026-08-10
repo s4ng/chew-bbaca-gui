@@ -103,6 +103,68 @@ impl SchemaStore {
         Ok(())
     }
 
+    /// 내보낸 스키마 폴더를 다시 들여온다.
+    ///
+    /// **`PrepExternalSchema` 와는 다른 물건이다.** 이것은 이 앱이 내보낸 것을
+    /// 되돌리는 기능이고, 외부 형식의 스키마를 chewBBACA 형식으로 변환하는 것은
+    /// 별개의 모듈이다. 그래서 여기서는 변환 없이 복사만 한다.
+    ///
+    /// 검증은 Windows 쪽에서 먼저 한다 — 잘못된 폴더를 고른 경우 WSL 을 거치지 않고
+    /// 즉시 알려줄 수 있다.
+    pub fn import(&self, src: &Path, name: &str) -> Result<SchemaInfo> {
+        let display_name = name.trim();
+        if display_name.is_empty() {
+            return Err(Error::InvalidInput("스키마 이름을 입력하세요".into()));
+        }
+        if !src.is_dir() {
+            return Err(Error::InvalidInput(format!(
+                "폴더를 찾을 수 없습니다: {}",
+                src.display()
+            )));
+        }
+
+        // chewBBACA 스키마는 loci FASTA 가 `schema_seed/` 안에 있다.
+        let seed = src.join("schema_seed");
+        if !seed.is_dir() {
+            return Err(Error::InvalidInput(format!(
+                "chewBBACA 스키마 폴더가 아닙니다 — 안에 schema_seed 폴더가 없습니다.\n[스키마] → [내보내기] 로 만든 폴더를 그대로 고르세요.\n고른 폴더: {}",
+                src.display()
+            )));
+        }
+        let loci = std::fs::read_dir(&seed)?
+            .flatten()
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("fasta"))
+            })
+            .count();
+        if loci == 0 {
+            return Err(Error::InvalidInput(
+                "schema_seed 폴더에 loci FASTA 파일이 없습니다. 내보내기가 덜 끝난 폴더일 수 있습니다.".into(),
+            ));
+        }
+
+        // 작업이 만든 것과 같은 규칙으로 ID 를 만든다. 뒤의 8자리는 충돌 회피용이다.
+        let suffix = uuid::Uuid::new_v4().to_string();
+        let schema_id = format!("{}-{}", crate::util::slugify(display_name), &suffix[..8]);
+        let backend_path = self.runner.import_schema_dir(src, &schema_id)?;
+
+        // 복사가 끝난 뒤 실제 값으로 등록한다. 원본을 세는 것보다 확실하다.
+        let probed = self.runner.inspect_schema_dir(&schema_id, display_name).ok();
+        let info = SchemaInfo {
+            schema_id,
+            name: display_name.to_string(),
+            created_at: now_iso(),
+            created_by_job: None,
+            backend_path,
+            ptf: probed.as_ref().and_then(|p| p.ptf.clone()),
+            loci_count: probed.as_ref().and_then(|p| p.loci_count),
+        };
+        self.db.insert_schema(&info)?;
+        Ok(info)
+    }
+
     /// 스키마 전체를 Windows 폴더로 내보낸다 (백업·다른 PC 이관용).
     pub fn export(&self, schema_id: &str, dest: &Path) -> Result<()> {
         let info = self.get(schema_id)?;

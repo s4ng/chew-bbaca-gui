@@ -89,8 +89,20 @@ impl JobManager {
         if spec.module.takes_input_dir() {
             validate_host_path(std::path::Path::new(&spec.input_dir))?;
         }
-        if spec.module == Module::AlleleCall && spec.schema_id.is_none() {
-            return Err(Error::InvalidInput("스키마를 선택하세요".into()));
+        if spec.module == Module::AlleleCall {
+            if spec.schema_id.is_none() {
+                return Err(Error::InvalidInput("스키마를 선택하세요".into()));
+            }
+            if let Some(gl) = spec.loci_list.as_deref().filter(|s| !s.trim().is_empty()) {
+                validate_host_path(std::path::Path::new(gl))?;
+                let info = crate::commands::inspect_loci_list(gl.to_string())?;
+                if !info.looks_valid {
+                    return Err(Error::InvalidInput(format!(
+                        "loci 목록 파일이 아닙니다{}.\nExtractCgMLST 가 만든 cgMLSTschema*.txt 처럼 한 줄에 loci 이름 하나만 있는 파일을 선택하세요.",
+                        if info.tabbed { " (탭으로 나뉜 표입니다)" } else { " (비어 있습니다)" }
+                    )));
+                }
+            }
         }
         if spec.module == Module::ExtractCgMLST {
             let file = spec.profiles_file.as_deref().unwrap_or("");

@@ -5,6 +5,7 @@ import { MODULE_INFO, MODULE_LABEL, MODULE_STEP } from "../lib/format";
 import {
   backendStatus,
   inspectInputDir,
+  inspectLociList,
   inspectProfilesFile,
   jobsSubmit,
   schemasList,
@@ -15,6 +16,7 @@ import {
   type BackendStatus,
   type InputDirInfo,
   type JobSpec,
+  type LociListInfo,
   type Module,
   type ProfilesInfo,
   type SchemaInfo,
@@ -75,6 +77,7 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
   const [schemaId, setSchemaId] = useState("");
   const [ptf, setPtf] = useState("");
   const [lociList, setLociList] = useState("");
+  const [lociInfo, setLociInfo] = useState<LociListInfo | null>(null);
   const [cdsInput, setCdsInput] = useState(false);
   const [cpu, setCpu] = useState("");
   const [profilesFile, setProfilesFile] = useState("");
@@ -150,6 +153,21 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     };
   }, [profilesFile]);
 
+  // loci 목록도 고른 즉시 확인한다. 프로파일 표를 여기에 넣는 것이 흔한 실수다.
+  useEffect(() => {
+    if (!lociList) {
+      setLociInfo(null);
+      return;
+    }
+    let cancelled = false;
+    inspectLociList(lociList)
+      .then((info) => !cancelled && setLociInfo(info))
+      .catch(() => !cancelled && setLociInfo(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [lociList]);
+
   const submit = async () => {
     setError(null);
     setBusy(true);
@@ -158,7 +176,8 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         module,
         inputDir: module === "ExtractCgMLST" ? "" : inputDir,
         outputDir,
-        cdsInput,
+        // ExtractCgMLST 에는 --cds 개념이 없다.
+        cdsInput: module === "ExtractCgMLST" ? false : cdsInput,
         schemaId: module === "AlleleCall" ? schemaId : null,
         schemaName: module === "CreateSchema" ? schemaName : null,
         ptf: module === "CreateSchema" && ptf ? ptf : null,
@@ -183,7 +202,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
       ? inputDir !== "" && schemaName.trim() !== ""
       : module === "AlleleCall"
         ? inputDir !== "" && schemaId !== ""
-        : profilesFile !== "" && profilesInfo?.looksValid === true);
+        : profilesFile !== "" && profilesInfo?.looksValid === true) &&
+    // loci 목록은 선택이지만, 골랐다면 올바른 파일이어야 한다.
+    (lociList === "" || lociInfo?.looksValid === true);
 
   return (
     <>
@@ -299,16 +320,6 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               </div>
             </div>
 
-            <div className="field">
-              <label className="inline-check">
-                <input
-                  type="checkbox"
-                  checked={cdsInput}
-                  onChange={(e) => setCdsInput(e.target.checked)}
-                />
-                입력이 이미 CDS 입니다 (--cds)
-              </label>
-            </div>
           </>
         )}
 
@@ -341,10 +352,21 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 </button>
                 {lociList && <button onClick={() => setLociList("")}>지우기</button>}
               </div>
-              <div className="hint">
-                이 목록은 ExtractCgMLST 가 만들어 줍니다 (<code>cgMLSTschema95.txt</code> 등).
-                비워두면 스키마의 모든 loci 를 대상으로 합니다.
-              </div>
+              {lociInfo && !lociInfo.looksValid ? (
+                <div className="banner error" style={{ marginTop: 8, marginBottom: 0 }}>
+                  loci 목록 파일이 아닙니다
+                  {lociInfo.tabbed ? " — 탭으로 나뉜 표입니다." : " — 비어 있습니다."}
+                  <br />
+                  ExtractCgMLST 가 만든 <code>cgMLSTschema95.txt</code> 처럼 한 줄에 loci
+                  이름 하나만 있는 파일을 선택하세요.
+                </div>
+              ) : (
+                <div className="hint">
+                  {lociInfo
+                    ? `loci ${lociInfo.loci}개를 대상으로 실행합니다`
+                    : "이 목록은 ExtractCgMLST 가 만들어 줍니다 (cgMLSTschema95.txt 등). 비워두면 스키마의 모든 loci 를 대상으로 합니다."}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -363,6 +385,24 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               어떤 loci 를 core 로 볼지 정하는 기준입니다. 0.95 면 &quot;균주의 95% 이상에
               존재하는 loci&quot; 를 뜻합니다. 공백으로 구분해 여러 값을 넣을 수 있고, 값마다
               결과 한 벌씩 나옵니다.
+            </div>
+          </div>
+        )}
+
+        {/* 어셈블리를 입력으로 받는 두 모듈에 공통이다. ExtractCgMLST 는 해당 없음. */}
+        {module !== "ExtractCgMLST" && (
+          <div className="field">
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={cdsInput}
+                onChange={(e) => setCdsInput(e.target.checked)}
+              />
+              입력이 이미 CDS 입니다 (--cds)
+            </label>
+            <div className="hint">
+              게놈 전체가 아니라 단백질 코딩 서열만 담긴 FASTA 라면 켜세요. 유전자 예측
+              (Prodigal)을 건너뜁니다. 잘못 켜면 결과가 크게 달라집니다.
             </div>
           </div>
         )}

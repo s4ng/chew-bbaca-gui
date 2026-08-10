@@ -81,6 +81,18 @@ pub struct ProfilesInfo {
     pub looks_valid: bool,
 }
 
+/// `--gl` loci 목록 파일 진단 결과.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LociListInfo {
+    pub looks_valid: bool,
+    /// 빈 줄을 뺀 줄 수 = 대상 loci 수
+    pub loci: usize,
+    /// 탭이 있으면 loci 목록이 아니라 표다.
+    pub tabbed: bool,
+    pub first_line: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiskUsage {
@@ -315,6 +327,16 @@ pub fn schemas_delete(state: State<'_, AppState>, schema_id: String) -> Result<(
     state.schemas().delete(&schema_id)
 }
 
+/// 내보낸 스키마 폴더를 다시 들여온다. 되돌릴 수 있는 조작이라 확인을 받지 않는다.
+#[tauri::command]
+pub fn schemas_import(
+    state: State<'_, AppState>,
+    dir: String,
+    name: String,
+) -> Result<SchemaInfo> {
+    state.schemas().import(Path::new(&dir), &name)
+}
+
 #[tauri::command]
 pub fn schemas_export(
     state: State<'_, AppState>,
@@ -369,6 +391,49 @@ pub fn inspect_input_dir(path: String) -> Result<InputDirInfo> {
         path,
         total_files: total,
         fasta_files: fasta,
+    })
+}
+
+/// `--gl` 에 넘길 loci 목록 파일인지 확인한다.
+///
+/// 프로파일 표(가로로 넓다)를 여기에 잘못 넣는 것이 흔한 실수다. loci 목록은
+/// **한 줄에 식별자 하나**이므로 탭이 들어 있으면 표로 보고 거른다.
+/// 정상이라면 몇 개를 대상으로 하게 되는지 알려준다 — 3,127 중 1,270 처럼
+/// 숫자가 보이면 사용자가 잘못 골랐는지 스스로 알아챈다.
+#[tauri::command]
+pub fn inspect_loci_list(path: String) -> Result<LociListInfo> {
+    use std::io::BufRead;
+
+    let file = Path::new(&path);
+    crate::paths::validate_host_path(file)?;
+    if !file.is_file() {
+        return Err(Error::InvalidInput("파일을 찾을 수 없습니다".into()));
+    }
+
+    let reader = std::io::BufReader::new(std::fs::File::open(file)?);
+    let mut loci = 0usize;
+    let mut tabbed = false;
+    let mut first = String::new();
+
+    for line in reader.lines().map_while(std::result::Result::ok) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if first.is_empty() {
+            first = trimmed.to_string();
+        }
+        if trimmed.contains('\t') {
+            tabbed = true;
+        }
+        loci += 1;
+    }
+
+    Ok(LociListInfo {
+        looks_valid: loci > 0 && !tabbed,
+        loci,
+        tabbed,
+        first_line: first,
     })
 }
 
@@ -519,6 +584,34 @@ mod tests {
         assert!(!info.looks_valid, "이 표는 거절해야 한다");
         assert_eq!(info.first_column, "Genome");
 
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_loci_list_is_accepted_and_counted() {
+        // ExtractCgMLST 가 만드는 cgMLSTschema*.txt 모양 — 한 줄에 식별자 하나.
+        let path = std::env::temp_dir().join("chewie-gate-loci.txt");
+        std::fs::write(&path, "genome1-protein1
+genome1-protein10
+
+genome1-protein11
+").unwrap();
+        let info = inspect_loci_list(path.to_string_lossy().to_string()).unwrap();
+        assert!(info.looks_valid);
+        assert_eq!(info.loci, 3, "빈 줄은 세지 않는다");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_profile_table_is_rejected_as_a_loci_list() {
+        // 프로파일 표를 --gl 에 넣는 것이 흔한 실수다. 탭이 있으면 표로 본다.
+        let path = std::env::temp_dir().join("chewie-gate-loci-tsv.txt");
+        std::fs::write(&path, "FILE	locus1	locus2
+g1	1	2
+").unwrap();
+        let info = inspect_loci_list(path.to_string_lossy().to_string()).unwrap();
+        assert!(!info.looks_valid);
+        assert!(info.tabbed);
         let _ = std::fs::remove_file(path);
     }
 

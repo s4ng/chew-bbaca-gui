@@ -123,6 +123,14 @@ export interface ProfilesInfo {
   looksValid: boolean;
 }
 
+/** `--gl` loci 목록 파일 진단 (Rust `commands::LociListInfo` 와 1:1) */
+export interface LociListInfo {
+  looksValid: boolean;
+  loci: number;
+  tabbed: boolean;
+  firstLine: string;
+}
+
 // ---------------------------------------------------------------- 이벤트
 
 export type LogStream = "stdout" | "stderr" | "app";

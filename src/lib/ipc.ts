@@ -14,6 +14,7 @@ import type {
   InputDirInfo,
   Job,
   JobSpec,
+  LociListInfo,
   LogEvent,
   ProgressEvent,
   ProfilesInfo,
@@ -57,6 +58,8 @@ export const jobsAdopted = () => invoke<Job[]>("jobs_adopted");
 
 export const schemasList = () => invoke<SchemaInfo[]>("schemas_list");
 export const schemasDelete = (schemaId: string) => invoke<void>("schemas_delete", { schemaId });
+export const schemasImport = (dir: string, name: string) =>
+  invoke<SchemaInfo>("schemas_import", { dir, name });
 export const schemasExport = (schemaId: string, dest: string) =>
   invoke<string>("schemas_export", { schemaId, dest });
 
@@ -67,6 +70,8 @@ export const settingsSet = (settings: Settings) => invoke<void>("settings_set", 
 export const inspectInputDir = (path: string) => invoke<InputDirInfo>("inspect_input_dir", { path });
 export const inspectProfilesFile = (path: string) =>
   invoke<ProfilesInfo>("inspect_profiles_file", { path });
+export const inspectLociList = (path: string) =>
+  invoke<LociListInfo>("inspect_loci_list", { path });
 /** 따라해보기 가이드를 앱 폴더에 꺼내 기본 브라우저로 연다. 반환값은 그 파일 경로. */
 export const guideOpen = () => invoke<string>("guide_open");
 

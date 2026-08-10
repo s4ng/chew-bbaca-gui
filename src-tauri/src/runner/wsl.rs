@@ -537,6 +537,34 @@ impl ChewieRunner for WslRunner {
         Ok(())
     }
 
+    fn import_schema_dir(&self, host_src: &Path, schema_id: &str) -> Result<String> {
+        validate_host_path(host_src)?;
+        let src = self.to_backend_path(host_src)?;
+        let dest = format!("{}/{}", self.schema_root()?, schema_id);
+
+        // `set -e` 와 `[ -e ]` 로 덮어쓰기를 막는다. mkdir -p 로 만들고 복사하면
+        // 이미 있는 스키마 위에 파일이 섞여 들어간다.
+        let script = format!(
+            "set -e
+             if [ -e {dest} ]; then echo '이미 같은 이름의 스키마가 있습니다' >&2; exit 3; fi
+             mkdir -p {dest}
+             cp -a {src}/. {dest}/
+             ls -1 {dest}/schema_seed/*.fasta 2>/dev/null | wc -l",
+            src = sh_quote(&src),
+            dest = sh_quote(&dest),
+        );
+        let out = self.bash(&script)?;
+        if !out.ok() {
+            // 실패하면 반쯤 복사된 디렉터리를 남기지 않는다.
+            let _ = self.bash(&format!("rm -rf {}", sh_quote(&dest)));
+            return Err(Error::Other(format!(
+                "스키마를 들여오지 못했습니다.\n{}",
+                out.stderr.trim()
+            )));
+        }
+        Ok(dest)
+    }
+
     fn export_dir(&self, backend_path: &str, host_dest: &Path) -> Result<()> {
         std::fs::create_dir_all(host_dest)?;
         let dest = self.to_backend_path(host_dest)?;

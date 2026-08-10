@@ -94,11 +94,13 @@ pub fn run() {
             commands::jobs_adopted,
             commands::schemas_list,
             commands::schemas_delete,
+            commands::schemas_import,
             commands::schemas_export,
             commands::settings_get,
             commands::settings_set,
             commands::inspect_input_dir,
             commands::inspect_profiles_file,
+            commands::inspect_loci_list,
             commands::guide_open,
         ])
         .run(tauri::generate_context!())

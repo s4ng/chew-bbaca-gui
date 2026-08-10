@@ -57,6 +57,11 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
                 v.push("--gl".into());
                 v.push(gl.clone());
             }
+            // AlleleCall 도 CDS 입력을 받는다. CreateSchema 에만 붙이고 있어서
+            // CDS FASTA 를 가진 사용자는 Prodigal 이 다시 도는 결과를 얻고 있었다.
+            if a.cds_input {
+                v.push("--cds".into());
+            }
         }
         Module::ExtractCgMLST => {
             // 입력이 폴더가 아니라 AlleleCall 결과 TSV 파일 하나다.
@@ -143,6 +148,22 @@ mod tests {
         a.thresholds = Some("   ".into());
         let v = build_argv(Module::ExtractCgMLST, &a);
         assert!(!v.contains(&"--t".to_string()), "{v:?}");
+    }
+
+    #[test]
+    fn allele_call_forwards_cds_flag() {
+        // AlleleCall 도 --cds 를 받는다. 빠져 있으면 CDS 입력에 Prodigal 이 다시 돈다.
+        let mut a = args();
+        a.cds_input = true;
+        assert!(build_argv(Module::AlleleCall, &a).contains(&"--cds".to_string()));
+    }
+
+    #[test]
+    fn extract_cgmlst_ignores_cds_flag() {
+        // ExtractCgMLST 에는 --cds 가 없다.
+        let mut a = args();
+        a.cds_input = true;
+        assert!(!build_argv(Module::ExtractCgMLST, &a).contains(&"--cds".to_string()));
     }
 
     #[test]

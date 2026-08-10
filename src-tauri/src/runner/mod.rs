@@ -171,6 +171,12 @@ pub trait ChewieRunner: Send + Sync {
 
     fn remove_schema(&self, schema_id: &str) -> Result<()>;
 
+    /// Windows 폴더의 스키마를 앱 저장소로 들여온다 (내보내기의 역방향).
+    ///
+    /// 원본은 손대지 않고 복사만 한다. 같은 ID 가 이미 있으면 덮어쓰지 않고 실패한다 —
+    /// 사용 중인 스키마를 조용히 갈아치우면 이전 AlleleCall 결과와 대응이 깨진다.
+    fn import_schema_dir(&self, host_src: &Path, schema_id: &str) -> Result<String>;
+
     /// 백엔드 디렉터리를 Windows 폴더로 내보낸다.
     fn export_dir(&self, backend_path: &str, host_dest: &Path) -> Result<()>;
 
