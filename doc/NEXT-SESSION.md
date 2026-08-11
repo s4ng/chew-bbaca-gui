@@ -227,6 +227,15 @@ loci 12개를 뽑아 만든 폴더다.
 
 ## 4. 손대기 전에 알아야 할 함정
 
+- **serde 의 `rename_all` 은 열거형에서 *variant 이름*을 바꾼다.** 필드를 바꾸는 것은
+  `rename_all_fields` 다. `ModuleParams` 에 `rename_all = "camelCase"` 만 붙였다가
+  태그가 `createSchema` 가 되어 **네 모듈 전부 제출이 불가능**했다 (2026-08-11).
+  variant 는 `Module` 과 같은 PascalCase, 필드는 camelCase 여야 한다.
+  - 더 일반적인 교훈: **양쪽 타입이 각자 맞아도 그 사이 문자열 표현은 어긋날 수 있다.**
+    Rust 도 컴파일되고 `tsc` 도 통과했지만 실제 IPC 는 깨져 있었다.
+    `models.rs` 의 테스트가 **프런트가 보내는 JSON 을 문자열 그대로** 넣어 왕복시킨다.
+    `JobSpec` 이나 `types.ts` 를 고치면 그 테스트의 JSON 도 함께 고친다.
+
 - **작업의 stdout 을 앱의 파이프로 직접 받으면 안 된다.** (2026-08-10 실측)
   앱이 닫히면 파이프가 닫히고, 거기에 쓰던 chewBBACA 가 SIGPIPE 로 죽는다.
   `setsid` 는 프로세스 그룹만 분리할 뿐 출력 대상까지 떼어주지는 않는다.
