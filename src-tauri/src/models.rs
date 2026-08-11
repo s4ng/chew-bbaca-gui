@@ -412,6 +412,43 @@ mod tests {
     }
 
     #[test]
+    fn remove_genes_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":null,"module":"RemoveGenes",
+                "profilesFile":"C:/results_alleles.tsv","genesList":"C:/drop.txt",
+                "keepInstead":false}"#,
+            Module::RemoveGenes,
+        );
+    }
+
+    #[test]
+    fn join_profiles_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":null,"module":"JoinProfiles",
+                "profilesFiles":["C:/a.tsv","C:/b.tsv"],"commonOnly":true}"#,
+            Module::JoinProfiles,
+        );
+    }
+
+    #[test]
+    fn schema_evaluator_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":8,"module":"SchemaEvaluator",
+                "schemaId":"s-1234abcd","lociReports":true}"#,
+            Module::SchemaEvaluator,
+        );
+    }
+
+    #[test]
+    fn allele_call_evaluator_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":null,"module":"AlleleCallEvaluator",
+                "resultsDir":"C:/results_20260810T105115","schemaId":"s-1234abcd"}"#,
+            Module::AlleleCallEvaluator,
+        );
+    }
+
+    #[test]
     fn module_tag_is_pascal_case_like_the_module_enum() {
         // variant 이름이 Module 의 직렬화 형태와 같아야 한다. 프런트는 하나만 안다.
         let spec: JobSpec = serde_json::from_str(

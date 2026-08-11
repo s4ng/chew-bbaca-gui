@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { formatDuration, formatTime, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
-import { jobsCancel, jobsGet, jobsLog, onLog, onProgress, onState } from "../lib/ipc";
+import { jobsCancel, jobsGet, jobsLog, onLog, onProgress, onState, reportOpen } from "../lib/ipc";
 import { asAppError, type Job, type LogStream } from "../lib/types";
 
 interface Line {
@@ -91,8 +91,21 @@ export default function JobDetail({
     }
   };
 
+  const openReport = async () => {
+    try {
+      await reportOpen(jobId);
+    } catch (e) {
+      setError(asAppError(e).message);
+    }
+  };
+
   const fraction = progress?.fraction ?? job?.progress ?? null;
   const running = job?.status === "running" || job?.status === "queued";
+  // 리포트는 회수가 끝나야 존재한다. 실행 중에 눌러도 열 것이 없다.
+  const hasReport =
+    job?.status === "completed" &&
+    job.outputPath != null &&
+    (job.module === "SchemaEvaluator" || job.module === "AlleleCallEvaluator");
 
   return (
     <>
@@ -112,6 +125,11 @@ export default function JobDetail({
           </p>
         </div>
         <div className="row">
+          {hasReport && (
+            <button className="primary" onClick={() => void openReport()}>
+              리포트 열기
+            </button>
+          )}
           {job?.outputPath && (
             <button onClick={() => void revealItemInDir(job.outputPath!)}>결과 폴더 열기</button>
           )}

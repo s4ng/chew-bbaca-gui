@@ -53,6 +53,8 @@ export const jobsLog = (jobId: string) => invoke<string>("jobs_log", { jobId });
 export const jobsReconcile = () => invoke<Job[]>("jobs_reconcile");
 /** 이어받은 작업 중 아직 실행 중인 것. 화면을 다시 열 때마다 물어도 된다. */
 export const jobsAdopted = () => invoke<Job[]>("jobs_adopted");
+/** 평가 리포트 HTML 을 기본 브라우저로 연다. 반환값은 연 파일의 경로. */
+export const reportOpen = (jobId: string) => invoke<string>("report_open", { jobId });
 
 // ---------------------------------------------------------------- 스키마
 

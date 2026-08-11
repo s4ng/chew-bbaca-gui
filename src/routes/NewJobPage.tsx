@@ -22,20 +22,14 @@ import {
   type SchemaInfo,
 } from "../lib/types";
 
-/** 단계는 셋이다. 1단계는 CreateSchema 와 PrepExternalSchema 가 나눠 갖는다. */
-const PIPELINE_STEPS = [1, 2, 3];
-
 /**
- * 폼이 실제로 제공하는 모듈. `Module` 전체가 아닌 이유는 두 평가 리포트가
- * 백엔드만 준비된 상태이기 때문이다 (doc/NEXT-SESSION.md).
+ * 1단계는 CreateSchema 와 PrepExternalSchema 가 나눠 갖는다.
+ * 4는 표준 3단계 바깥의 후처리·점검 도구들이 모이는 자리다 (format.ts 의 MODULE_STEP).
  */
-type FormModule =
-  | "CreateSchema"
-  | "AlleleCall"
-  | "ExtractCgMLST"
-  | "PrepExternalSchema"
-  | "RemoveGenes"
-  | "JoinProfiles";
+const PIPELINE_STEPS = [1, 2, 3, 4];
+
+/** 폼이 제공하는 모듈 — 이제 `Module` 전체와 같다. */
+type FormModule = Module;
 
 /**
  * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
@@ -100,6 +94,8 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
   const [profilesFile, setProfilesFile] = useState("");
   const [profilesInfo, setProfilesInfo] = useState<ProfilesInfo | null>(null);
   const [thresholds, setThresholds] = useState("");
+  const [resultsDir, setResultsDir] = useState("");
+  const [lociReports, setLociReports] = useState(false);
 
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [backend, setBackend] = useState<BackendStatus | null>(null);
@@ -211,7 +207,11 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 ? { ...common, module, profilesFile, genesList, keepInstead }
                 : module === "JoinProfiles"
                   ? { ...common, module, profilesFiles, commonOnly }
-                  : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
+                  : module === "SchemaEvaluator"
+                    ? { ...common, module, schemaId, lociReports }
+                    : module === "AlleleCallEvaluator"
+                      ? { ...common, module, resultsDir, schemaId }
+                      : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
       await jobsSubmit(spec);
       onSubmitted();
     } catch (e) {
@@ -223,6 +223,28 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
 
   // 스키마를 만드는 모듈은 산출물이 앱 저장소로 가므로 결과 폴더가 선택 항목이다.
   const producesSchema = module === "CreateSchema" || module === "PrepExternalSchema";
+  const isEvaluator = module === "SchemaEvaluator" || module === "AlleleCallEvaluator";
+
+  // 스키마 선택은 세 모듈이 그대로 공유한다 (AlleleCall · 평가 리포트 둘).
+  const schemaField = (
+    <div className="field">
+      <label htmlFor="schema">스키마</label>
+      <select id="schema" value={schemaId} onChange={(e) => setSchemaId(e.target.value)}>
+        <option value="">선택하세요</option>
+        {schemas.map((s) => (
+          <option key={s.schemaId} value={s.schemaId}>
+            {s.name}
+            {s.lociCount ? ` (loci ${s.lociCount})` : ""}
+          </option>
+        ))}
+      </select>
+      {schemas.length === 0 && (
+        <div className="hint">
+          아직 스키마가 없습니다. 먼저 CreateSchema 로 스키마를 만드세요.
+        </div>
+      )}
+    </div>
+  );
   const ready =
     (producesSchema || outputDir !== "") &&
     (producesSchema
@@ -233,7 +255,11 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           ? profilesFile !== "" && profilesInfo?.looksValid === true && genesList !== ""
           : module === "JoinProfiles"
             ? profilesFiles.length >= 2
-            : profilesFile !== "" && profilesInfo?.looksValid === true) &&
+            : module === "SchemaEvaluator"
+              ? schemaId !== ""
+              : module === "AlleleCallEvaluator"
+                ? resultsDir !== "" && schemaId !== ""
+                : profilesFile !== "" && profilesInfo?.looksValid === true) &&
     // loci 목록은 선택이지만, 골랐다면 올바른 파일이어야 한다.
     (lociList === "" || lociInfo?.looksValid === true);
 
@@ -267,6 +293,10 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             <option value="PrepExternalSchema">
               PrepExternalSchema — 외부 스키마를 변환해 들여오기
             </option>
+            <option value="SchemaEvaluator">SchemaEvaluator — 스키마 품질 리포트</option>
+            <option value="AlleleCallEvaluator">
+              AlleleCallEvaluator — allele 결과 품질 리포트
+            </option>
           </select>
         </div>
 
@@ -275,7 +305,32 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
 
       <div className="card">
 
-        {module === "PrepExternalSchema" ? (
+        {module === "SchemaEvaluator" ? (
+          // 입력이 앱 저장소의 스키마뿐이라 고를 경로가 없다.
+          schemaField
+        ) : module === "AlleleCallEvaluator" ? (
+          <>
+            <div className="field">
+              <label htmlFor="results">AlleleCall 결과 폴더</label>
+              <div className="row">
+                <input
+                  id="results"
+                  type="text"
+                  value={resultsDir}
+                  readOnly
+                  placeholder="results_<날짜시각> 폴더를 선택하세요"
+                />
+                <button onClick={() => void pickDir(setResultsDir)}>찾아보기</button>
+              </div>
+              <div className="hint">
+                파일 하나가 아니라 <b>폴더</b>를 고릅니다. 그 안의 여러 파일을 함께 읽기
+                때문입니다. <code>[입력이 이미 CDS 입니다]</code> 를 켜고 돌린 결과에는
+                필요한 파일(<code>cds_coordinates.tsv</code>)이 없어 리포트를 만들 수 없습니다.
+              </div>
+            </div>
+            {schemaField}
+          </>
+        ) : module === "PrepExternalSchema" ? (
           <div className="field">
             <label htmlFor="input">외부 스키마 폴더</label>
             <div className="row">
@@ -402,23 +457,7 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
 
         {module === "AlleleCall" && (
           <>
-            <div className="field">
-              <label htmlFor="schema">스키마</label>
-              <select id="schema" value={schemaId} onChange={(e) => setSchemaId(e.target.value)}>
-                <option value="">선택하세요</option>
-                {schemas.map((s) => (
-                  <option key={s.schemaId} value={s.schemaId}>
-                    {s.name}
-                    {s.lociCount ? ` (loci ${s.lociCount})` : ""}
-                  </option>
-                ))}
-              </select>
-              {schemas.length === 0 && (
-                <div className="hint">
-                  아직 스키마가 없습니다. 먼저 CreateSchema 로 스키마를 만드세요.
-                </div>
-              )}
-            </div>
+            {schemaField}
 
             <div className="field">
               <label htmlFor="gl">일부 loci 만 대상으로 (--gl) — 선택</label>
@@ -526,6 +565,24 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           </div>
         )}
 
+        {module === "SchemaEvaluator" && (
+          <div className="field">
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={lociReports}
+                onChange={(e) => setLociReports(e.target.checked)}
+              />
+              loci 마다 상세 페이지도 만든다 (--loci-reports)
+            </label>
+            <div className="hint">
+              loci 하나하나의 길이 분포와 정렬(MSA)을 볼 수 있게 됩니다. 대신 loci 마다
+              MAFFT 를 돌리므로 훨씬 오래 걸리고(loci 3,127개 기준 3초 → 39초) 결과 폴더에
+              loci 수만큼 HTML 파일이 생깁니다.
+            </div>
+          </div>
+        )}
+
         {module === "ExtractCgMLST" && (
           <div className="field">
             <label htmlFor="thr">존재 임계값 (--t) — 선택</label>
@@ -584,7 +641,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               ? "만들어진 스키마는 앱 저장소에 보관되고 [스키마] 화면에서 관리합니다. 이 폴더를 지정하면 실행 로그 사본만 남습니다 — 스키마 파일은 [스키마] → [내보내기] 로 꺼냅니다."
               : module === "AlleleCall"
                 ? "AlleleCall 결과가 이 폴더로 회수됩니다."
-                : "cgMLST 프로파일과 loci 목록(cgMLSTschema*.txt)이 이 폴더로 회수됩니다."}
+                : isEvaluator
+                  ? "리포트 HTML 이 이 폴더로 회수됩니다. 다 끝나면 [작업 상세] 의 [리포트 열기] 로 브라우저에서 볼 수 있습니다."
+                  : "cgMLST 프로파일과 loci 목록(cgMLSTschema*.txt)이 이 폴더로 회수됩니다."}
           </div>
         </div>
 

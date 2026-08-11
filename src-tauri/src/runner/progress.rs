@@ -140,6 +140,70 @@ const PREP_EXTERNAL: &[Stage] = &[
     ("number of invalid loci", 0.92, 0.06, "마무리 중"),
 ];
 
+/// SchemaEvaluator. 2026-08-11 실측 (loci 3127개, `--cpu 8`).
+///
+/// 비용이 `--loci-reports` 하나로 갈린다 — 끄면 3초(loci 통계뿐), 켜면 39초이고
+/// 그중 35초가 loci 마다 도는 MAFFT 다. 그래서 MSA 구간에 몰아준다.
+/// 끈 경우 막대는 10% 에서 멈췄다가 완료로 뛴다. 3초짜리라 그편이 낫다.
+const SCHEMA_EVALUATOR: &[Stage] = &[
+    ("computing loci statistics", 0.02, 0.08, "loci 통계 계산 중"),
+    ("calling the computemsa module", 0.10, 0.02, "MSA 준비 중"),
+    ("running mafft", 0.12, 0.80, "loci 별 MSA 계산 중"),
+    ("creating loci reports", 0.92, 0.06, "loci 리포트 생성 중"),
+];
+
+/// AlleleCallEvaluator. 2026-08-11 실측 (균주 32개 × loci 3127개, 34초).
+///
+/// 앞의 여러 단계는 다 합쳐도 2초다. 무거운 곳은 둘 — core genome MSA(15초)와
+/// **NJ 트리(15초)** 다.
+///
+/// 트리 구간에 `results are available in` 을 쓰는 이유: chewBBACA 는
+/// `Computing the NJ tree...` 를 줄바꿈 없이 찍고 **끝난 뒤에** `done.` 을 붙인다.
+/// 우리 pump 는 `\n`/`\r` 로만 자르므로 그 줄은 이미 끝난 다음에야 도착한다.
+/// 바로 앞 줄(임시 산출물 안내)을 진입 신호로 삼아야 15초 동안 막대가 죽지 않는다.
+/// 마지막 줄 `Results available in ...` 과는 글자가 달라(`are` 유무) 겹치지 않는다.
+const ALLELE_CALL_EVALUATOR: &[Stage] = &[
+    (
+        "computing sample statistics",
+        0.00,
+        0.02,
+        "균주 통계 계산 중",
+    ),
+    ("computing loci statistics", 0.02, 0.02, "loci 통계 계산 중"),
+    ("reading profile matrix", 0.04, 0.02, "프로파일 표 읽는 중"),
+    ("masking profile matrix", 0.06, 0.02, "프로파일 표 정리 중"),
+    (
+        "computing presence-absence matrix",
+        0.08,
+        0.02,
+        "존재/부재 행렬 계산 중",
+    ),
+    ("determining cgmlst loci", 0.10, 0.02, "core genome 판정 중"),
+    (
+        "computing pairwise distances",
+        0.12,
+        0.03,
+        "균주 간 거리 계산 중",
+    ),
+    (
+        "creating fasta files with the alleles",
+        0.15,
+        0.03,
+        "allele 서열 모으는 중",
+    ),
+    ("running mafft", 0.18, 0.35, "core genome MSA 계산 중"),
+    ("adding gap sequences", 0.53, 0.02, "MSA 정렬 맞추는 중"),
+    (
+        "creating file with the full protein msa",
+        0.55,
+        0.05,
+        "단백질 MSA 기록 중",
+    ),
+    // 트리 구간 진입 — 아래 줄이 도착할 때는 이미 끝나 있다.
+    ("results are available in", 0.60, 0.38, "NJ 트리 계산 중"),
+    ("computing the nj tree", 0.98, 0.01, "NJ 트리 계산 중"),
+];
+
 fn percent_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(\d{1,3})\s*%").expect("percent regex"))
@@ -169,13 +233,11 @@ impl ProgressParser {
                 Module::AlleleCall => ALLELE_CALL,
                 Module::ExtractCgMLST => EXTRACT_CGMLST,
                 Module::PrepExternalSchema => PREP_EXTERNAL,
-                // 아래 넷은 단계 표시를 붙이지 않는다. RemoveGenes·JoinProfiles 는
-                // 몇 초면 끝나고, 두 평가 리포트는 단계 문구를 아직 실측하지 못했다.
+                Module::SchemaEvaluator => SCHEMA_EVALUATOR,
+                Module::AlleleCallEvaluator => ALLELE_CALL_EVALUATOR,
+                // 이 둘은 단계 표시를 붙이지 않는다 — 몇 초면 끝난다.
                 // 표가 비면 진행률은 멈춘 채로 있고 로그만 흐른다 — 거짓 표시보다 낫다.
-                Module::RemoveGenes
-                | Module::JoinProfiles
-                | Module::SchemaEvaluator
-                | Module::AlleleCallEvaluator => &[],
+                Module::RemoveGenes | Module::JoinProfiles => &[],
             },
             stage: usize::MAX,
             last: 0.0,
@@ -346,6 +408,116 @@ mod tests {
             prev = *v;
         }
         assert!(prev >= 0.92, "마지막 진행률이 {prev} 에 그쳤다");
+    }
+
+    /// 2026-08-11 실측. loci 3127개 스키마에 `--loci-reports` 를 켠 경우.
+    const SCHEMA_EVALUATOR_LOG: &[&str] = &[
+        "Started at: 2026-08-11T10:45:55",
+        "The schema was created with chewBBACA v3.5.4.",
+        "Computing loci statistics...",
+        " [                    ] 0%",
+        " [====================] 100%",
+        "Provided annotations for 0 loci in the schema.",
+        "Calling the ComputeMSA module to compute the loci MSAs...",
+        "Input is a directory with FASTA files.",
+        "Copying FASTA files to temp directory...",
+        "Running MAFFT to compute the MSA for each input file...",
+        " [                    ] 0%",
+        " [==========          ] 50%",
+        " [====================] 100%",
+        "MSAs for each input file are available in /tmp/scale/se2/temp/MSAs",
+        "Creating loci reports...",
+        " [====================] 100%",
+        "Results available in /tmp/scale/se2.",
+    ];
+
+    /// 같은 날 AlleleCallEvaluator 실측 (균주 32개 × loci 3127개).
+    const ALLELE_CALL_EVALUATOR_LOG: &[&str] = &[
+        "Number of samples: 32",
+        "Number of loci: 3127",
+        "Computing sample statistics...done.",
+        "Computing loci statistics...done.",
+        "Provided annotations for 0 loci in the schema.",
+        "Reading profile matrix...done.",
+        "Masking profile matrix...done.",
+        "Computing Presence-Absence matrix...done.",
+        "Determining cgMLST loci...",
+        " Computed for...1 genomes.",
+        " Computed for...32 genomes.",
+        " cgMLST is composed of 1140 loci.",
+        "Computing pairwise distances...",
+        " [                    ] 0%",
+        " [====================] 100%",
+        "Creating distance matrix...done.",
+        "Calling the ComputeMSA module to compute the cgMLST alignment...",
+        "Input is a TSV file with allelic profiles.",
+        "Importing allelic profiles...",
+        "Total loci: 1140",
+        "Total samples: 32",
+        "Masking profiles...",
+        "Determining the list of alleles identified for each locus...",
+        "Number of loci that were not identified in the dataset: 0",
+        "Creating FASTA files with the alleles identified in the dataset...",
+        "Translating alleles...",
+        "Output files available in /tmp/scale/ace/temp",
+        "Running MAFFT to compute the MSA for each input file...",
+        " [                    ] 0%",
+        " [==========          ] 50%",
+        " [====================] 100%",
+        "Adding gap sequences for samples missing loci...",
+        " [====================] 100%",
+        "Creating file with the full protein MSA...",
+        " [====================] 100%",
+        "Protein MSA length: 350614",
+        "Results are available in /tmp/scale/ace/temp",
+        "Computing the NJ tree based on the core genome MSA...done.",
+        "Results available in /tmp/scale/ace.",
+    ];
+
+    #[test]
+    fn schema_evaluator_log_advances_monotonically() {
+        let seen = run(Module::SchemaEvaluator, SCHEMA_EVALUATOR_LOG);
+        assert!(!seen.is_empty(), "실측 로그에서 아무것도 인식하지 못했다");
+        let mut prev = 0.0;
+        for (v, _) in &seen {
+            assert!(*v > prev, "되감김: {prev} → {v}");
+            prev = *v;
+        }
+        assert!(prev >= 0.92, "마지막 진행률이 {prev} 에 그쳤다");
+    }
+
+    #[test]
+    fn allele_call_evaluator_log_advances_monotonically() {
+        let seen = run(Module::AlleleCallEvaluator, ALLELE_CALL_EVALUATOR_LOG);
+        assert!(!seen.is_empty(), "실측 로그에서 아무것도 인식하지 못했다");
+        let mut prev = 0.0;
+        for (v, _) in &seen {
+            assert!(*v > prev, "되감김: {prev} → {v}");
+            prev = *v;
+        }
+        assert!(prev >= 0.98, "마지막 진행률이 {prev} 에 그쳤다");
+    }
+
+    #[test]
+    fn nj_tree_stage_starts_before_the_silent_wait() {
+        // 트리 계산 15초 동안 chewBBACA 는 한 줄도 내지 않는다 (줄바꿈 없이 찍고
+        // 끝난 뒤 done. 을 붙인다). 그 직전 줄에서 이미 트리 구간에 들어가 있어야
+        // 막대가 죽지 않는다.
+        let mut p = ProgressParser::for_module(Module::AlleleCallEvaluator);
+        let (_, label) = p.observe("Results are available in /home/chewie/work/j1/output/temp").unwrap();
+        assert_eq!(label, "NJ 트리 계산 중");
+        assert!(p.value() >= 0.60, "got {}", p.value());
+    }
+
+    #[test]
+    fn final_results_line_is_not_mistaken_for_the_tree_stage() {
+        // 마지막 줄 "Results available in ..." 에는 `are` 가 없다. 둘을 혼동하면
+        // 트리를 건너뛴 작업도 트리 구간으로 표시된다.
+        let mut p = ProgressParser::for_module(Module::AlleleCallEvaluator);
+        p.observe("Computing sample statistics...done.");
+        let before = p.value();
+        assert!(p.observe("Results available in /home/chewie/work/j1/output.").is_none());
+        assert_eq!(p.value(), before);
     }
 
     #[test]

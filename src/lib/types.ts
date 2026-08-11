@@ -2,10 +2,7 @@
 // 필드 이름이 어긋나면 조용히 undefined 가 되므로, Rust 구조체를 고칠 때
 // 반드시 이 파일도 함께 고친다.
 
-/**
- * Rust `Module` 과 1:1. 마지막 둘은 백엔드만 준비돼 있고 **아직 폼에 노출하지
- * 않는다** — 실행 검증과 리포트 열기 경로가 남아 있다 (doc/NEXT-SESSION.md).
- */
+/** Rust `Module` 과 1:1. 여덟 개 모두 폼에 노출된다. */
 export type Module =
   | "CreateSchema"
   | "AlleleCall"
@@ -90,6 +87,18 @@ export type JobSpec =
       profilesFiles: string[];
       /** 공통 loci 만으로 합칠지 (--common) */
       commonOnly: boolean;
+    })
+  | (JobSpecCommon & {
+      module: "SchemaEvaluator";
+      schemaId: string;
+      /** loci 마다 상세 페이지를 만든다 (--loci-reports). 느려진다 */
+      lociReports: boolean;
+    })
+  | (JobSpecCommon & {
+      module: "AlleleCallEvaluator";
+      /** AlleleCall 결과 **폴더** — 파일 하나가 아니다 */
+      resultsDir: string;
+      schemaId: string;
     });
 
 export interface SchemaInfo {

@@ -88,6 +88,7 @@ pub fn run() {
             commands::jobs_log,
             commands::jobs_reconcile,
             commands::jobs_adopted,
+            commands::report_open,
             commands::schemas_list,
             commands::schemas_delete,
             commands::schemas_import,

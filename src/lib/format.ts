@@ -89,14 +89,21 @@ export const MODULE_INFO: Record<Module, ModuleInfo> = {
       "스키마가 자란 뒤의 결과를 예전 결과와 합칠 때는 [공통 loci 만] 을 켜야 합니다. 열 구성이 다르면 그냥은 합쳐지지 않습니다.",
   },
   SchemaEvaluator: {
-    summary: "스키마 자체의 품질을 진단하는 HTML 리포트를 만듭니다.",
-    needs: "스키마",
-    gives: "리포트 HTML 묶음",
+    summary:
+      "스키마 자체를 훑어 loci 마다 allele 이 몇 개인지, 길이가 얼마나 들쭉날쭉한지를 브라우저에서 볼 수 있는 리포트로 만듭니다. 스키마를 실제 분석에 쓰기 전에 이상한 loci 가 없는지 확인하는 용도입니다.",
+    needs: "스키마 (앱 저장소에 있는 것)",
+    gives: "schema_report.html — 결과 폴더로 회수되고 [리포트 열기] 로 브라우저에서 봅니다",
+    caution:
+      "[loci 마다 상세 페이지] 를 켜면 loci 수만큼 MAFFT 정렬을 돌립니다. loci 3,127개 기준 3초에서 39초로 늘어나고, 회수할 파일도 loci 수만큼 늘어납니다.",
   },
   AlleleCallEvaluator: {
-    summary: "AlleleCall 결과의 품질을 진단하는 HTML 리포트를 만듭니다.",
-    needs: "AlleleCall 결과 폴더와 스키마",
-    gives: "리포트 HTML 묶음",
+    summary:
+      "AlleleCall 결과를 균주별·loci 별로 집계하고 core genome 을 정렬해 균주 사이의 거리와 계통수(NJ 트리)까지 담은 리포트를 만듭니다. 결과를 넘기기 전에 이상한 균주가 섞이지 않았는지 보는 용도입니다.",
+    needs: "AlleleCall 결과 폴더(파일이 아니라 폴더)와 그때 쓴 스키마",
+    gives:
+      "allelecall_report.html — 거리 행렬·존재/부재 표·cgMLST 트리가 함께 나옵니다",
+    caution:
+      "AlleleCall 을 [입력이 이미 CDS 입니다(--cds)] 로 돌린 결과에는 이 모듈이 필요로 하는 cds_coordinates.tsv 가 없습니다. 그런 폴더는 고를 수 없습니다.",
   },
   PrepExternalSchema: {
     summary:

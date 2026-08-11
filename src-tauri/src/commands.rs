@@ -322,6 +322,68 @@ pub fn jobs_adopted(state: State<'_, AppState>) -> Result<Vec<Job>> {
     state.manager.adopted_jobs()
 }
 
+/// 평가 리포트 HTML 을 기본 브라우저로 연다.
+///
+/// 앱 웹뷰에 띄우지 않는 이유는 CSP 와 asset 프로토콜을 열어야 하기 때문만이
+/// 아니다 — 리포트는 확대·검색·인쇄가 되는 브라우저에서 보는 편이 낫다.
+///
+/// **여는 것까지 Rust 가 한다.** 프런트의 `openPath` 는 스코프가 비어 있어
+/// 어떤 경로도 통과하지 못한다 (`guide_open` 의 주석 참조).
+#[tauri::command]
+pub fn report_open(app: AppHandle, state: State<'_, AppState>, job_id: String) -> Result<String> {
+    use tauri_plugin_opener::OpenerExt;
+
+    let job = state
+        .manager
+        .get(&job_id)?
+        .ok_or_else(|| Error::JobNotFound(job_id.clone()))?;
+    let dir = job.output_path.as_deref().unwrap_or_default();
+    if dir.is_empty() {
+        return Err(Error::Other(
+            "결과가 아직 회수되지 않아 리포트를 찾을 수 없습니다".into(),
+        ));
+    }
+
+    let path = find_report(Path::new(dir), job.module).ok_or_else(|| {
+        Error::Other(format!(
+            "결과 폴더에서 리포트 HTML 을 찾지 못했습니다.\n폴더를 직접 열어 확인하세요: {dir}"
+        ))
+    })?;
+
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| {
+            Error::Other(format!(
+                "리포트를 열지 못했습니다: {e}\n파일은 여기 있습니다: {}",
+                path.display()
+            ))
+        })?;
+    Ok(path.to_string_lossy().to_string())
+}
+
+/// 회수된 결과 폴더에서 리포트 HTML 을 찾는다.
+///
+/// 파일 이름은 3.5.4 를 직접 돌려 확인했다 (2026-08-11). 그래도 이름만 믿지 않고
+/// `*_report.html` 로 한 번 더 훑는다 — 판올림으로 이름이 바뀌어도 열리도록.
+fn find_report(dir: &Path, module: crate::models::Module) -> Option<PathBuf> {
+    use crate::models::Module;
+
+    let known = match module {
+        Module::SchemaEvaluator => "schema_report.html",
+        Module::AlleleCallEvaluator => "allelecall_report.html",
+        _ => return None,
+    };
+    let direct = dir.join(known);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    std::fs::read_dir(dir).ok()?.flatten().find_map(|e| {
+        let p = e.path();
+        let name = p.file_name()?.to_string_lossy().to_ascii_lowercase();
+        (name.ends_with("_report.html") && p.is_file()).then_some(p)
+    })
+}
+
 // ================================================================ 스키마
 
 #[tauri::command]
@@ -556,6 +618,48 @@ mod tests {
             writeln!(f, "{}", line.join("\t")).unwrap();
         }
         path
+    }
+
+    /// 리포트 파일 이름은 3.5.4 를 직접 돌려 확인한 값이다 (2026-08-11).
+    /// 여기서 굳혀 두지 않으면 [리포트 열기] 가 조용히 아무것도 못 찾게 된다.
+    #[test]
+    fn finds_each_module_report_by_its_measured_name() {
+        use crate::models::Module;
+
+        for (module, name) in [
+            (Module::SchemaEvaluator, "schema_report.html"),
+            (Module::AlleleCallEvaluator, "allelecall_report.html"),
+        ] {
+            let dir = std::env::temp_dir().join(format!("chewie-report-{name}"));
+            std::fs::create_dir_all(&dir).unwrap();
+            // 리포트 옆에는 같은 확장자가 아닌 큰 부산물들이 함께 놓인다.
+            std::fs::write(dir.join("report_bundle.js"), "x").unwrap();
+            std::fs::write(dir.join(name), "<html>").unwrap();
+
+            let found = find_report(&dir, module).expect("리포트를 찾지 못했다");
+            assert_eq!(found.file_name().unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn falls_back_to_any_report_html_when_the_name_changed() {
+        // 판올림으로 이름이 바뀌어도 열리기는 해야 한다.
+        let dir = std::env::temp_dir().join("chewie-report-renamed");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("something_report.html"), "<html>").unwrap();
+
+        let found = find_report(&dir, crate::models::Module::SchemaEvaluator).unwrap();
+        assert_eq!(found.file_name().unwrap(), "something_report.html");
+    }
+
+    #[test]
+    fn other_modules_have_no_report() {
+        // 평가 모듈이 아니면 결과 폴더에 리포트 비슷한 것이 있어도 찾지 않는다.
+        let dir = std::env::temp_dir().join("chewie-report-notmine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("schema_report.html"), "<html>").unwrap();
+
+        assert!(find_report(&dir, crate::models::Module::AlleleCall).is_none());
     }
 
     #[test]
