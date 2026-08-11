@@ -76,8 +76,11 @@
   온보딩을 통과해 바로 진입한다. 지우려면 `wsl --unregister chewie-env`.
   온보딩 ③ 을 다시 보려면 지운 뒤 켜면 된다 — 개발 실행에는 동봉 rootfs 가 없으므로
   설치 버튼 대신 안내가 뜨는 것이 정상이다 (§3-① 참조).
-- 스모크 테스트 잔재가 배포판 안에 남아 있다: `/tmp/smoke/`(합성 입력·스키마·결과),
-  `/tmp/gen.py`, `/tmp/pgidtest.sh`. 지워도 무방하다.
+- 배포판 안의 `/tmp` 는 비어 있다 (2026-08-11 에 검증용 잔재를 정리했다).
+  실데이터는 Windows 쪽 `C:\Users\zalcl\chewBBACA_tutorial\` 에 있다 —
+  *S. agalactiae* 완성 게놈 32개(`genomes\complete_genomes\complete_genomes\*.fna`),
+  loci 3,127개 스키마, AlleleCall 결과 폴더 셋, `cgMLSTschema95.txt`(loci 목록 1,270).
+  모듈을 검증할 때 합성 데이터를 새로 만들 필요가 없다.
 - `%LOCALAPPDATA%\ChewieApp\` 은 스모크 테스트로 이미 생성되어 있다 (정상, 앱이 재사용한다).
 - git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`).
   원격은 <https://github.com/s4ng/chew-bbaca-gui> (**공개**). `gh` 는 `s4ng` 로 인증돼 있다.
@@ -90,52 +93,27 @@
 
 ## 3. 다음 작업 (우선순위 순)
 
-### ① rootfs 를 만들어 실제로 한 번 완주시킨다 — **최우선**
+### ① rootfs 빌드와 배포판 등록 — ✅ 2026-08-10 완료
 
-나머지 모든 검증이 여기에 걸려 있다. GUI 를 더 만들기 전에 이것부터 한다.
+이미지는 `dist-rootfs/chewie-rootfs-3.5.4.tar.gz` (503MB, sha256 `9d1cb6e0…`) 로 있고,
+등록·실행·취소·스키마 등록까지 앱을 거쳐 확인됐다. 이미지를 고칠 때만 다시 빌드한다.
 
 ```bash
 # Linux 또는 WSL(Ubuntu) 안에서, Docker 필요
 ./rootfs/build.sh 3.5.4          # → dist-rootfs/chewie-rootfs-3.5.4.tar.gz + .sha256
 ```
 
-> **2026-08-10: 이미 빌드되어 있다.** `dist-rootfs/chewie-rootfs-3.5.4.tar.gz` (503MB,
-> sha256 `9d1cb6e0…`). 아래 빌드 명령은 이미지를 고칠 때만 다시 돌리면 된다.
+배포판을 다시 등록해야 할 때 쓸 수 있는 세 가지 (개발 편의 순서로는 두 번째가 빠르다).
 
-그다음 셋 중 하나로 등록한다.
-
-- **인스톨러로:** `npm run tauri:build` → rootfs 가 동봉된 NSIS 설치. 설치 후 첫 실행에서
-  온보딩 ③ 의 [설치] 버튼. **실제 배포 경로와 같으므로 최종 확인은 반드시 이쪽으로 한다.**
+- **인스톨러로:** rootfs 가 동봉된 NSIS 설치 → 첫 실행에서 온보딩 ③ 의 [설치] 버튼.
+  **실제 배포 경로와 같으므로 최종 확인은 반드시 이쪽으로 한다.**
 - **개발 실행에서:** `tauri:dev` 에는 동봉본이 없다. `설정 → rootfs 이미지` 칸에
-  `<저장소>\dist-rootfs\chewie-rootfs-3.5.4.tar.gz` 의 **절대 경로**를 넣으면
-  검증 후 등록한다. 반복 개발에는 이쪽이 빠르다.
+  tar.gz 의 **절대 경로**를 넣으면 검증 후 등록한다.
 - **수동으로:** `wsl --import chewie-env "%LOCALAPPDATA%\ChewieApp\wsl" <tar.gz> --version 2`
-  (등록 경로는 건너뛰고 Runner 만 빨리 보고 싶을 때)
 
-등록 후 확인 순서 — **1·3 은 2026-08-10 에 CLI 로 확인했다. 남은 것은 앱을 거치는 2·4 다.**
-
-1. ~~`bash -lc 'chewBBACA.py --version'` — micromamba 활성화~~ ✅ `3.5.4`
-2. **앱에서** CreateSchema 를 작은 데이터셋으로 실행 → 로그가 **실시간으로** 흐르는지
-   (버퍼링되면 `PYTHONUNBUFFERED` 또는 `\r` 처리 문제다). 여기서 처음으로
-   `stage_input`(Windows→ext4 복사)과 `collect_output`(회수)이 실행된다.
-3. ~~실행 중 [취소] → 잔존 프로세스 0~~ ✅ CLI 로 확인 (exit 143, 잔존 0).
-   다만 **앱의 [취소] 버튼**을 거치는 경로는 아직이다 — PGID 가 SQLite 에 실제로
-   기록되는지가 그 경로에서만 드러난다.
-4. 완료 후 `스키마` 화면에 등록되는지, `loci 수`/`.trn` 이 잡히는지
-
-> 합성 데이터가 필요하면 배포판 안의 `/tmp/gen.py` 를 쓰면 된다 (`--cds` 입력 생성).
-> 실제 어셈블리로 해야 ②(성능 비교)와 진행률 비중 재조정이 의미 있다.
-
-**착수 지점:** `src-tauri/src/jobs.rs` 의 `run_job()` — 이제 러너가 아니라 그 위가 미검증이다.
-
-> **2026-08-10 해소됨.** 이미지를 빌드했고 tar 목록으로 다음을 확인했다 —
-> `opt/conda/bin/` 에 `chewBBACA.py`·`blastp`·`mafft`·`FastTree` 가, `usr/bin/` 에
-> `micromamba` 가, 그리고 `etc/wsl.conf`·`etc/profile.d/chewie.sh` 가 들어 있다.
-> `profile.d-chewie.sh` 가 가정한 `MAMBA_ROOT_PREFIX=/opt/conda` 는 맞다.
-> 프로필 활성화도 확인됐다 — `bash -lc 'chewBBACA.py --version'` → `3.5.4`.
-> 단, **`bash -lc` 를 거치지 않으면 안 된다.** `wsl -d chewie-env -- python3` 처럼
-> 직접 실행하면 `/opt/conda/bin` 이 PATH 에 없어 실패한다. `exec()` 로 부르는 것은
-> coreutils(`printenv`, `cp` 등)로 한정해야 한다.
+> **`bash -lc` 를 거치지 않으면 안 된다.** micromamba 활성화가 프로필에서 일어나므로
+> `wsl -d chewie-env -e python3` 처럼 직접 실행하면 `/opt/conda/bin` 이 PATH 에 없어
+> 실패한다. `exec()` 로 부르는 것은 coreutils(`printenv`, `cp` 등)로 한정한다.
 
 ### ② `/mnt/c` vs ext4 실측 (§5.2 의 전제)
 
