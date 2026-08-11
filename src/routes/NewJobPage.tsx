@@ -32,6 +32,12 @@ const PIPELINE_STEPS = [1, 2, 3, 4];
 type FormModule = Module;
 
 /**
+ * `--cpu` 인자를 받지 않는 모듈. `runner/cli.rs` 의 `no_cpu` 와 같은 목록이어야 한다.
+ * 어긋나면 한쪽은 칸을 보여주고 다른 쪽은 값을 버린다.
+ */
+const NO_CPU: Module[] = ["ExtractCgMLST", "RemoveGenes", "JoinProfiles"];
+
+/**
  * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
  *
  * 단계 번호를 붙이는 이유는 이 세 모듈이 **실제로 순서가 있는 절차**이기 때문이다.
@@ -647,8 +653,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           </div>
         </div>
 
-        {/* ExtractCgMLST 에는 --cpu 인자가 없다 (cli.rs 참조). */}
-        {module !== "ExtractCgMLST" && (
+        {/* 이 셋에는 --cpu 인자가 아예 없다 (cli.rs 의 `no_cpu`). 칸을 띄워두면
+            값을 넣어도 아무 일이 없는데 사용자는 반영됐다고 믿는다. */}
+        {!NO_CPU.includes(module) && (
         <div className="field">
           <label htmlFor="cpu">CPU 개수 — 선택</label>
           <input
