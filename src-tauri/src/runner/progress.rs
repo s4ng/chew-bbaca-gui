@@ -169,6 +169,13 @@ impl ProgressParser {
                 Module::AlleleCall => ALLELE_CALL,
                 Module::ExtractCgMLST => EXTRACT_CGMLST,
                 Module::PrepExternalSchema => PREP_EXTERNAL,
+                // 아래 넷은 단계 표시를 붙이지 않는다. RemoveGenes·JoinProfiles 는
+                // 몇 초면 끝나고, 두 평가 리포트는 단계 문구를 아직 실측하지 못했다.
+                // 표가 비면 진행률은 멈춘 채로 있고 로그만 흐른다 — 거짓 표시보다 낫다.
+                Module::RemoveGenes
+                | Module::JoinProfiles
+                | Module::SchemaEvaluator
+                | Module::AlleleCallEvaluator => &[],
             },
             stage: usize::MAX,
             last: 0.0,

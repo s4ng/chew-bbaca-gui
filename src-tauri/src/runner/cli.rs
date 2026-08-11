@@ -20,6 +20,12 @@ pub struct BackendArgs {
     pub loci_list: Option<String>,
     pub cds_input: bool,
     pub cpu: u32,
+    /// 입력이 여러 개인 모듈용 (JoinProfiles). 비어 있으면 `input` 을 쓴다.
+    pub inputs: Vec<String>,
+    /// 두 번째 입력 파일 (RemoveGenes 의 loci 목록)
+    pub genes_list: Option<String>,
+    /// `--inverse` / `--common` 처럼 모듈마다 뜻이 다른 단일 스위치
+    pub flag: bool,
     /// ExtractCgMLST 의 `--t`. 공백으로 구분된 임계값들. 비면 인자를 넣지 않는다.
     pub thresholds: Option<String>,
 }
@@ -63,6 +69,45 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
                 v.push("--cds".into());
             }
         }
+        Module::RemoveGenes => {
+            // `-o` 가 폴더가 아니라 **파일**이다.
+            v.push("-i".into());
+            v.push(a.input.clone());
+            v.push("-g".into());
+            v.push(a.genes_list.clone().unwrap_or_default());
+            v.push("-o".into());
+            v.push(a.output.clone());
+            if a.flag {
+                v.push("--inverse".into());
+            }
+        }
+        Module::JoinProfiles => {
+            // `-p` 뒤에 파일이 여러 개 온다.
+            v.push("-p".into());
+            v.extend(a.inputs.iter().cloned());
+            v.push("-o".into());
+            v.push(a.output.clone());
+            if a.flag {
+                v.push("--common".into());
+            }
+        }
+        Module::SchemaEvaluator => {
+            v.push("-g".into());
+            v.push(a.schema.clone().unwrap_or_default());
+            v.push("-o".into());
+            v.push(a.output.clone());
+            if a.flag {
+                v.push("--loci-reports".into());
+            }
+        }
+        Module::AlleleCallEvaluator => {
+            v.push("-i".into());
+            v.push(a.input.clone());
+            v.push("-g".into());
+            v.push(a.schema.clone().unwrap_or_default());
+            v.push("-o".into());
+            v.push(a.output.clone());
+        }
         Module::PrepExternalSchema => {
             // `-g` 는 어셈블리가 아니라 **변환할 스키마 폴더**다.
             v.push("-g".into());
@@ -91,9 +136,13 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
         }
     }
 
-    // `--cpu` 는 모든 모듈에 있는 인자가 아니다. ExtractCgMLST 에 붙이면
-    // argparse 가 "unrecognized arguments" 로 즉시 실패한다.
-    if !matches!(module, Module::ExtractCgMLST) {
+    // `--cpu` 는 모든 모듈에 있는 인자가 아니다. 없는 모듈에 붙이면 argparse 가
+    // "unrecognized arguments" 로 즉시 실패한다. 셋 다 `--help` 로 확인했다.
+    let no_cpu = matches!(
+        module,
+        Module::ExtractCgMLST | Module::RemoveGenes | Module::JoinProfiles
+    );
+    if !no_cpu {
         v.push("--cpu".into());
         v.push(a.cpu.to_string());
     }

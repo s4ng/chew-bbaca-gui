@@ -210,6 +210,49 @@ loci 수까지 정상 표시. `stage_input` → `-g` 연결도 이로써 검증�
 
 이로써 **네 모듈 모두 UI 경로로 검증 완료**다.
 
+### ⑤-1 다음 세션의 첫 작업 — 평가 리포트 두 개
+
+`SchemaEvaluator` · `AlleleCallEvaluator` 는 **백엔드만 준비돼 있고 UI 에 노출되지
+않는다.** 착수하면 바로 이어서 할 수 있도록 남은 것만 적는다.
+
+**이미 되어 있는 것** (커밋됨, 컴파일·테스트 통과)
+
+- `Module` 에 두 variant, `cli_name`/`parse` 까지
+- `ModuleParams::SchemaEvaluator { schema_id, loci_reports }`
+  / `AlleleCallEvaluator { results_dir, schema_id }`
+- `cli.rs::build_argv` 의 인자 조립 (`--help` 로 확인한 실제 인자)
+  - SchemaEvaluator: `-g <스키마>/schema_seed -o <out> --cpu [--loci-reports]`
+  - AlleleCallEvaluator: `-i <결과폴더> -g <스키마>/schema_seed -o <out> --cpu`
+- `wsl.rs::run()` 의 스테이징 분기
+  - SchemaEvaluator 는 **스테이징하지 않는다** (스키마가 이미 ext4 안에 있다)
+  - AlleleCallEvaluator 는 결과 폴더를 `stage_input` 으로 복사한다
+- `jobs.rs::submit()` 게이트 (스키마 선택 여부, 결과 폴더에 results_alleles.tsv 존재)
+- `types.ts` 의 `Module` 유니온, `MODULE_LABEL`/`MODULE_INFO`/`MODULE_STEP`
+
+**남은 것**
+
+1. `types.ts` 의 `JobSpec` 유니온에 두 variant 추가 → `models.rs` 의 왕복 테스트에도
+   해당 JSON 을 넣는다 (이 테스트가 있어야 serde 계약이 지켜진다).
+2. `NewJobPage.tsx` 의 `FormModule` 에 두 개를 더하고 `<option>` 과 입력 칸을 만든다.
+   - SchemaEvaluator: 스키마 선택 + [loci 별 상세 리포트] 체크박스
+   - AlleleCallEvaluator: 결과 폴더 선택 + 스키마 선택
+3. **실행 검증** — 리포트 HTML 파일명을 확인한다. `SchemaEvaluator` 는
+   `schema_report.html`, `AlleleCallEvaluator` 는 `allelecall_report.html` 로 알려져
+   있으나 **실측하지 않았다.** 3.5.4 로 직접 돌려 확인할 것.
+4. `progress.rs` 의 단계표. 지금은 빈 표라 진행률이 멈춘 채로 있다(로그는 흐른다).
+   실측 로그로 채운다 — 추측으로 채우면 두 번 다 틀렸던 전례가 있다.
+
+### ⑤-2 리포트를 브라우저로 여는 경로
+
+**내장 뷰어는 만들지 않기로 했다.** 앱 웹뷰에 띄우려면 CSP 를 열고 asset 프로토콜을
+붙여야 하는데, 리포트는 확대·검색·인쇄가 되는 브라우저에서 보는 편이 낫다.
+
+- [작업 상세] 에 평가 리포트 작업이면 **[리포트 열기]** 버튼을 띄운다.
+- 여는 방식은 [따라해보기] 와 동일하다 — `commands.rs::guide_open` 참조.
+  **프런트의 `openPath` 는 스코프가 비어 있어 열리지 않는다.** Rust 에서
+  `app.opener().open_path(...)` 로 연다.
+- 회수된 결과 폴더 안에서 `*_report.html` 을 찾아 그 경로를 연다.
+
 ### ⑤ 그다음 (v0.2 범위)
 
 - ~~`ExtractCgMLST` 추가~~ ✅ **2026-08-10 구현 완료.** 다만 **앱에서 아직 실행해보지 않았다.**

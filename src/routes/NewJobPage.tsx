@@ -26,6 +26,18 @@ import {
 const PIPELINE_STEPS = [1, 2, 3];
 
 /**
+ * 폼이 실제로 제공하는 모듈. `Module` 전체가 아닌 이유는 두 평가 리포트가
+ * 백엔드만 준비된 상태이기 때문이다 (doc/NEXT-SESSION.md).
+ */
+type FormModule =
+  | "CreateSchema"
+  | "AlleleCall"
+  | "ExtractCgMLST"
+  | "PrepExternalSchema"
+  | "RemoveGenes"
+  | "JoinProfiles";
+
+/**
  * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
  *
  * 단계 번호를 붙이는 이유는 이 세 모듈이 **실제로 순서가 있는 절차**이기 때문이다.
@@ -71,7 +83,11 @@ function ModuleGuide({ module }: { module: Module }) {
 }
 
 export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void }) {
-  const [module, setModule] = useState<Module>("CreateSchema");
+  const [module, setModule] = useState<FormModule>("CreateSchema");
+  const [genesList, setGenesList] = useState("");
+  const [keepInstead, setKeepInstead] = useState(false);
+  const [profilesFiles, setProfilesFiles] = useState<string[]>([]);
+  const [commonOnly, setCommonOnly] = useState(false);
   const [inputDir, setInputDir] = useState("");
   const [outputDir, setOutputDir] = useState("");
   const [schemaName, setSchemaName] = useState("");
@@ -110,6 +126,14 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
   const pickFile = async (setter: (v: string) => void, name: string, extensions: string[]) => {
     const picked = await open({ multiple: false, filters: [{ name, extensions }] });
     if (typeof picked === "string") setter(picked);
+  };
+
+  const pickProfiles = async () => {
+    const picked = await open({
+      multiple: true,
+      filters: [{ name: "allelic profile", extensions: ["tsv"] }],
+    });
+    if (Array.isArray(picked)) setProfilesFiles(picked);
   };
 
   // 입력 폴더를 고르는 즉시 몇 개 파일이 잡히는지 알려준다. 40분 뒤에
@@ -183,7 +207,11 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             ? { ...common, module, inputDir, schemaId, lociList: lociList || null, cdsInput }
             : module === "PrepExternalSchema"
               ? { ...common, module, schemaDir: inputDir, schemaName, ptf: ptf || null }
-              : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
+              : module === "RemoveGenes"
+                ? { ...common, module, profilesFile, genesList, keepInstead }
+                : module === "JoinProfiles"
+                  ? { ...common, module, profilesFiles, commonOnly }
+                  : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
       await jobsSubmit(spec);
       onSubmitted();
     } catch (e) {
@@ -201,7 +229,11 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
       ? inputDir !== "" && schemaName.trim() !== ""
       : module === "AlleleCall"
         ? inputDir !== "" && schemaId !== ""
-        : profilesFile !== "" && profilesInfo?.looksValid === true) &&
+        : module === "RemoveGenes"
+          ? profilesFile !== "" && profilesInfo?.looksValid === true && genesList !== ""
+          : module === "JoinProfiles"
+            ? profilesFiles.length >= 2
+            : profilesFile !== "" && profilesInfo?.looksValid === true) &&
     // loci 목록은 선택이지만, 골랐다면 올바른 파일이어야 한다.
     (lociList === "" || lociInfo?.looksValid === true);
 
@@ -225,11 +257,13 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           <select
             id="module"
             value={module}
-            onChange={(e) => setModule(e.target.value as Module)}
+            onChange={(e) => setModule(e.target.value as FormModule)}
           >
             <option value="CreateSchema">CreateSchema — 어셈블리로부터 wgMLST 스키마 생성</option>
             <option value="AlleleCall">AlleleCall — 균주별 allelic profile 결정</option>
             <option value="ExtractCgMLST">ExtractCgMLST — allele 결과에서 core genome 추출</option>
+            <option value="RemoveGenes">RemoveGenes — 결과 표에서 loci 걸러내기</option>
+            <option value="JoinProfiles">JoinProfiles — 결과 표 여러 개 합치기</option>
             <option value="PrepExternalSchema">
               PrepExternalSchema — 외부 스키마를 변환해 들여오기
             </option>
@@ -260,7 +294,29 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 : "loci 하나당 FASTA 파일 하나로 되어 있어야 합니다. 압축을 푼 스키마 폴더를 그대로 고르세요."}
             </div>
           </div>
-        ) : module === "ExtractCgMLST" ? (
+        ) : module === "JoinProfiles" ? (
+          <div className="field">
+            <label>합칠 결과 파일 — 두 개 이상</label>
+            <div className="row">
+              <button onClick={() => void pickProfiles()}>파일 고르기</button>
+              {profilesFiles.length > 0 && (
+                <button onClick={() => setProfilesFiles([])}>비우기</button>
+              )}
+            </div>
+            {profilesFiles.length > 0 ? (
+              <ul className="detail-list" style={{ marginTop: 8 }}>
+                {profilesFiles.map((f) => (
+                  <li key={f} className="path">{f}</li>
+                ))}
+              </ul>
+            ) : (
+              <div className="hint">
+                같은 스키마로 만든 results_alleles.tsv 를 두 개 이상 고르세요.
+                Ctrl 을 누른 채 여러 개를 선택할 수 있습니다.
+              </div>
+            )}
+          </div>
+        ) : module === "ExtractCgMLST" || module === "RemoveGenes" ? (
           <div className="field">
             <label htmlFor="profiles">AlleleCall 결과 파일</label>
             <div className="row">
@@ -423,6 +479,51 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               </div>
             </div>
           </>
+        )}
+
+        {module === "RemoveGenes" && (
+          <>
+            <div className="field">
+              <label htmlFor="genes">대상 loci 목록</label>
+              <div className="row">
+                <input id="genes" type="text" value={genesList} readOnly placeholder="loci 이름이 한 줄에 하나씩" />
+                <button onClick={() => void pickFile(setGenesList, "loci 목록", ["txt", "tsv"])}>
+                  찾아보기
+                </button>
+                {genesList && <button onClick={() => setGenesList("")}>지우기</button>}
+              </div>
+            </div>
+            <div className="field">
+              <label className="inline-check">
+                <input
+                  type="checkbox"
+                  checked={keepInstead}
+                  onChange={(e) => setKeepInstead(e.target.checked)}
+                />
+                목록에 있는 것만 남긴다 (--inverse)
+              </label>
+              <div className="hint">
+                끄면 목록의 loci 를 <b>제거</b>하고, 켜면 목록의 loci 만 <b>남깁니다</b>.
+              </div>
+            </div>
+          </>
+        )}
+
+        {module === "JoinProfiles" && (
+          <div className="field">
+            <label className="inline-check">
+              <input
+                type="checkbox"
+                checked={commonOnly}
+                onChange={(e) => setCommonOnly(e.target.checked)}
+              />
+              공통 loci 만으로 합친다 (--common)
+            </label>
+            <div className="hint">
+              열 구성이 다른 표를 합칠 때 켜세요. 스키마가 자란 뒤의 결과를 예전 결과와
+              합치는 경우가 여기 해당합니다.
+            </div>
+          </div>
         )}
 
         {module === "ExtractCgMLST" && (

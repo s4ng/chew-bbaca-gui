@@ -5,6 +5,10 @@ export const MODULE_LABEL: Record<Module, string> = {
   AlleleCall: "Allele calling",
   ExtractCgMLST: "core genome 추출",
   PrepExternalSchema: "외부 스키마 들여오기",
+  RemoveGenes: "loci 걸러내기",
+  JoinProfiles: "결과 합치기",
+  SchemaEvaluator: "스키마 리포트",
+  AlleleCallEvaluator: "결과 리포트",
 };
 
 /**
@@ -36,6 +40,11 @@ export const MODULE_STEP: Record<Module, number> = {
   PrepExternalSchema: 1,
   AlleleCall: 2,
   ExtractCgMLST: 3,
+  // 아래는 표준 3단계 바깥의 후처리·점검 도구다. 4로 묶어 "그다음" 을 뜻한다.
+  RemoveGenes: 4,
+  JoinProfiles: 4,
+  SchemaEvaluator: 4,
+  AlleleCallEvaluator: 4,
 };
 
 /** 단계 표시에 쓸 이름. 1단계는 두 모듈이 공유하므로 중립적으로 적는다. */
@@ -43,6 +52,7 @@ export const STEP_LABEL: Record<number, string> = {
   1: "1. 스키마 준비",
   2: "2. Allele calling",
   3: "3. core genome 추출",
+  4: "후처리 · 점검",
 };
 
 export const MODULE_INFO: Record<Module, ModuleInfo> = {
@@ -63,6 +73,30 @@ export const MODULE_INFO: Record<Module, ModuleInfo> = {
     next: "ExtractCgMLST 로 core genome 을 추려야 균주 비교에 쓸 수 있는 표가 됩니다.",
     caution:
       "처음 보는 서열은 새 allele 로 등록되어 스키마에 계속 추가됩니다. 스키마가 실행할 때마다 자라는 것은 정상입니다.",
+  },
+  RemoveGenes: {
+    summary:
+      "프로파일 표에서 일부 loci 를 빼거나, 반대로 그것만 남깁니다. 문제가 있는 유전자를 분석에서 제외할 때 씁니다.",
+    needs: "AlleleCall 결과 표와 대상 loci 목록 파일",
+    gives: "걸러낸 프로파일 표 하나",
+  },
+  JoinProfiles: {
+    summary:
+      "여러 번에 나눠 돌린 AlleleCall 결과를 표 하나로 합칩니다. 균주를 계속 추가하며 분석할 때 필요합니다.",
+    needs: "같은 스키마로 만든 결과 표 두 개 이상",
+    gives: "합쳐진 프로파일 표 하나",
+    caution:
+      "스키마가 자란 뒤의 결과를 예전 결과와 합칠 때는 [공통 loci 만] 을 켜야 합니다. 열 구성이 다르면 그냥은 합쳐지지 않습니다.",
+  },
+  SchemaEvaluator: {
+    summary: "스키마 자체의 품질을 진단하는 HTML 리포트를 만듭니다.",
+    needs: "스키마",
+    gives: "리포트 HTML 묶음",
+  },
+  AlleleCallEvaluator: {
+    summary: "AlleleCall 결과의 품질을 진단하는 HTML 리포트를 만듭니다.",
+    needs: "AlleleCall 결과 폴더와 스키마",
+    gives: "리포트 HTML 묶음",
   },
   PrepExternalSchema: {
     summary:

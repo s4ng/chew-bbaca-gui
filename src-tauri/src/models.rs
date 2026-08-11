@@ -17,6 +17,14 @@ pub enum Module {
     /// AlleleCall 결과에서 core genome 을 추린다. 입력이 **어셈블리 폴더가 아니라
     /// TSV 파일 하나**라 다른 두 모듈과 입력 모양이 다르다.
     ExtractCgMLST,
+    /// 프로파일 표에서 일부 loci 를 빼거나 남긴다.
+    RemoveGenes,
+    /// 여러 번에 나눠 돌린 프로파일 표를 하나로 합친다.
+    JoinProfiles,
+    /// 스키마 품질 리포트(HTML).
+    SchemaEvaluator,
+    /// AlleleCall 결과 품질 리포트(HTML).
+    AlleleCallEvaluator,
     /// 외부 스키마를 chewBBACA 형식으로 변환해 앱 저장소에 등록한다.
     /// CreateSchema 와 같은 자리(파이프라인 1단계)를 대신한다.
     PrepExternalSchema,
@@ -29,6 +37,10 @@ impl Module {
             Module::CreateSchema => "CreateSchema",
             Module::AlleleCall => "AlleleCall",
             Module::ExtractCgMLST => "ExtractCgMLST",
+            Module::RemoveGenes => "RemoveGenes",
+            Module::JoinProfiles => "JoinProfiles",
+            Module::SchemaEvaluator => "SchemaEvaluator",
+            Module::AlleleCallEvaluator => "AlleleCallEvaluator",
             Module::PrepExternalSchema => "PrepExternalSchema",
         }
     }
@@ -38,6 +50,10 @@ impl Module {
             "CreateSchema" => Some(Module::CreateSchema),
             "AlleleCall" => Some(Module::AlleleCall),
             "ExtractCgMLST" => Some(Module::ExtractCgMLST),
+            "RemoveGenes" => Some(Module::RemoveGenes),
+            "JoinProfiles" => Some(Module::JoinProfiles),
+            "SchemaEvaluator" => Some(Module::SchemaEvaluator),
+            "AlleleCallEvaluator" => Some(Module::AlleleCallEvaluator),
             "PrepExternalSchema" => Some(Module::PrepExternalSchema),
             _ => None,
         }
@@ -172,11 +188,44 @@ pub enum ModuleParams {
         #[serde(default)]
         ptf: Option<String>,
     },
+    RemoveGenes {
+        /// 걸러낼 대상 프로파일 표
+        profiles_file: String,
+        /// 제거할 loci 목록 파일
+        genes_list: String,
+        /// 켜면 목록에 있는 것만 **남긴다** (`--inverse`)
+        #[serde(default)]
+        keep_instead: bool,
+    },
+    JoinProfiles {
+        /// 합칠 프로파일 표들. 두 개 이상이어야 한다.
+        profiles_files: Vec<String>,
+        /// 공통 loci 만으로 합칠지 (`--common`). 스키마가 자란 뒤의 결과를
+        /// 예전 결과와 합칠 때 필요하다.
+        #[serde(default)]
+        common_only: bool,
+    },
+    SchemaEvaluator {
+        /// 평가할 스키마 (앱 저장소에 있으므로 스테이징하지 않는다)
+        schema_id: String,
+        /// loci 마다 상세 페이지를 만든다. 느려지지만 정보가 많다.
+        #[serde(default)]
+        loci_reports: bool,
+    },
+    AlleleCallEvaluator {
+        /// AlleleCall 결과 **폴더** (results_alleles.tsv 가 들어 있는 그 폴더)
+        results_dir: String,
+        schema_id: String,
+    },
 }
 
 impl JobSpec {
     pub fn module(&self) -> Module {
         match self.params {
+            ModuleParams::RemoveGenes { .. } => Module::RemoveGenes,
+            ModuleParams::JoinProfiles { .. } => Module::JoinProfiles,
+            ModuleParams::SchemaEvaluator { .. } => Module::SchemaEvaluator,
+            ModuleParams::AlleleCallEvaluator { .. } => Module::AlleleCallEvaluator,
             ModuleParams::CreateSchema { .. } => Module::CreateSchema,
             ModuleParams::AlleleCall { .. } => Module::AlleleCall,
             ModuleParams::ExtractCgMLST { .. } => Module::ExtractCgMLST,
@@ -193,7 +242,8 @@ impl JobSpec {
             ModuleParams::CreateSchema { input_dir, .. }
             | ModuleParams::AlleleCall { input_dir, .. } => Some(input_dir),
             ModuleParams::PrepExternalSchema { schema_dir, .. } => Some(schema_dir),
-            ModuleParams::ExtractCgMLST { .. } => None,
+            ModuleParams::AlleleCallEvaluator { results_dir, .. } => Some(results_dir),
+            _ => None,
         }
     }
 

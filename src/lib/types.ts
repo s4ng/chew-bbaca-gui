@@ -2,11 +2,19 @@
 // 필드 이름이 어긋나면 조용히 undefined 가 되므로, Rust 구조체를 고칠 때
 // 반드시 이 파일도 함께 고친다.
 
+/**
+ * Rust `Module` 과 1:1. 마지막 둘은 백엔드만 준비돼 있고 **아직 폼에 노출하지
+ * 않는다** — 실행 검증과 리포트 열기 경로가 남아 있다 (doc/NEXT-SESSION.md).
+ */
 export type Module =
   | "CreateSchema"
   | "AlleleCall"
   | "ExtractCgMLST"
-  | "PrepExternalSchema";
+  | "PrepExternalSchema"
+  | "RemoveGenes"
+  | "JoinProfiles"
+  | "SchemaEvaluator"
+  | "AlleleCallEvaluator";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -67,6 +75,21 @@ export type JobSpec =
       schemaDir: string;
       schemaName: string;
       ptf?: string | null;
+    })
+  | (JobSpecCommon & {
+      module: "RemoveGenes";
+      profilesFile: string;
+      /** 제거할 loci 목록 */
+      genesList: string;
+      /** 켜면 목록에 있는 것만 남긴다 (--inverse) */
+      keepInstead: boolean;
+    })
+  | (JobSpecCommon & {
+      module: "JoinProfiles";
+      /** 합칠 표들. 두 개 이상 */
+      profilesFiles: string[];
+      /** 공통 loci 만으로 합칠지 (--common) */
+      commonOnly: boolean;
     });
 
 export interface SchemaInfo {

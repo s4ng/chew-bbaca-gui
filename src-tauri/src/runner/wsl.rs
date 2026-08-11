@@ -170,6 +170,41 @@ impl WslRunner {
         Ok(format!("{work}/input/{name}"))
     }
 
+    /// 파일 여러 개를 ext4 로 복사한다 (JoinProfiles 처럼 입력이 목록인 모듈용).
+    ///
+    /// 같은 이름의 파일이 섞이면 서로 덮어쓰므로 번호를 붙여 구분한다 —
+    /// 여러 번 돌린 결과는 하나같이 `results_alleles.tsv` 다.
+    fn stage_files(
+        &self,
+        work: &str,
+        srcs: &[String],
+        sink: &EventSink,
+    ) -> Result<Vec<String>> {
+        sink(RunEvent::Notice(format!(
+            "입력 파일 {}개를 WSL 내부(ext4)로 복사하는 중...",
+            srcs.len()
+        )));
+
+        let mut lines = String::from("set -e\n");
+        lines.push_str(&format!(
+            "rm -rf {w}/input\nmkdir -p {w}/input {w}/output\n",
+            w = sh_quote(work)
+        ));
+        let mut staged = Vec::new();
+        for (i, src) in srcs.iter().enumerate() {
+            let dest = format!("{work}/input/{i}.tsv");
+            lines.push_str(&format!(
+                "cp -a {} {}\n",
+                sh_quote(src),
+                sh_quote(&dest)
+            ));
+            staged.push(dest);
+        }
+        self.bash(&lines)?.require_success()?;
+        sink(RunEvent::Notice("입력 파일 준비 완료".into()));
+        Ok(staged)
+    }
+
     /// 실행 스크립트. 반환값의 종료 코드는 chewBBACA 자신의 것이다.
     ///
     /// `setsid --wait` 가 두 가지를 동시에 해준다 —
@@ -363,22 +398,54 @@ impl ChewieRunner for WslRunner {
 
         let work = self.work_dir(job_id)?;
 
-        // 입력 모양이 모듈마다 다르다 — 어셈블리 폴더이거나, TSV 파일 하나이거나.
-        let staged_input = match spec.input_dir() {
-            Some(dir) => {
+        // 입력 모양이 모듈마다 다르다 — 폴더 · 파일 하나 · 파일 여럿 · 스테이징 없음.
+        // 파일 하나만 옮기면 될 것을 폴더째 복사하지 않도록 여기서 갈라 둔다.
+        let mut staged_files: Vec<String> = Vec::new();
+        let staged_input = match &spec.params {
+            _ if spec.input_dir().is_some() => {
+                let dir = spec.input_dir().expect("바로 위에서 확인했다");
                 validate_host_path(Path::new(dir))?;
                 let input_backend = self.to_backend_path(Path::new(dir))?;
                 self.stage_input(&work, &input_backend, sink)?;
                 format!("{work}/input")
             }
-            None => {
-                let ModuleParams::ExtractCgMLST { profiles_file, .. } = &spec.params else {
-                    return Err(Error::Other("입력이 없는 모듈이 아닙니다".into()));
-                };
+            ModuleParams::ExtractCgMLST { profiles_file, .. } => {
                 validate_host_path(Path::new(profiles_file))?;
                 let src = self.to_backend_path(Path::new(profiles_file))?;
                 self.stage_file(&work, &src, sink)?
             }
+            ModuleParams::RemoveGenes {
+                profiles_file,
+                genes_list,
+                ..
+            } => {
+                // 표와 목록 두 개. 둘 다 작아 함께 옮긴다.
+                for p in [profiles_file, genes_list] {
+                    validate_host_path(Path::new(p))?;
+                }
+                let srcs = [
+                    self.to_backend_path(Path::new(profiles_file))?,
+                    self.to_backend_path(Path::new(genes_list))?,
+                ];
+                staged_files = self.stage_files(&work, &srcs, sink)?;
+                staged_files[0].clone()
+            }
+            ModuleParams::JoinProfiles { profiles_files, .. } => {
+                let mut srcs = Vec::new();
+                for p in profiles_files {
+                    validate_host_path(Path::new(p))?;
+                    srcs.push(self.to_backend_path(Path::new(p))?);
+                }
+                staged_files = self.stage_files(&work, &srcs, sink)?;
+                staged_files.first().cloned().unwrap_or_default()
+            }
+            ModuleParams::SchemaEvaluator { .. } => {
+                // 입력이 앱 저장소의 스키마다. 이미 ext4 안에 있으므로 복사하지 않는다.
+                self.bash(&format!("mkdir -p {}/output", sh_quote(&work)))?
+                    .require_success()?;
+                String::new()
+            }
+            _ => return Err(Error::Other("입력 모양을 알 수 없는 모듈입니다".into())),
         };
 
         let cpu = match spec.cpu {
@@ -425,6 +492,27 @@ impl ChewieRunner for WslRunner {
             ModuleParams::ExtractCgMLST { thresholds, .. } => {
                 // 스키마도 어셈블리도 필요 없다. 입력 TSV 는 위에서 이미 스테이징했다.
                 args.thresholds = thresholds.clone();
+            }
+            ModuleParams::RemoveGenes { keep_instead, .. } => {
+                // `-o` 가 폴더가 아니라 파일이다. 회수는 폴더째 하므로 그 안에 만든다.
+                args.genes_list = staged_files.get(1).cloned();
+                args.output = format!("{work}/output/results_alleles_filtered.tsv");
+                args.flag = *keep_instead;
+            }
+            ModuleParams::JoinProfiles { common_only, .. } => {
+                args.inputs = staged_files.clone();
+                args.output = format!("{work}/output/joined_profiles.tsv");
+                args.flag = *common_only;
+            }
+            ModuleParams::SchemaEvaluator {
+                schema_id,
+                loci_reports,
+            } => {
+                args.schema = Some(format!("{}/{}/schema_seed", self.schema_root()?, schema_id));
+                args.flag = *loci_reports;
+            }
+            ModuleParams::AlleleCallEvaluator { schema_id, .. } => {
+                args.schema = Some(format!("{}/{}/schema_seed", self.schema_root()?, schema_id));
             }
             ModuleParams::PrepExternalSchema { ptf, .. } => {
                 // **`-o` 를 스키마 폴더가 아니라 그 안의 `schema_seed` 로 겨눈다.**

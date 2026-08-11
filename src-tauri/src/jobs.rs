@@ -153,6 +153,50 @@ impl JobManager {
                     validate_host_path(std::path::Path::new(p))?;
                 }
             }
+            ModuleParams::RemoveGenes {
+                profiles_file,
+                genes_list,
+                ..
+            } => {
+                Self::check_profiles(profiles_file)?;
+                validate_host_path(std::path::Path::new(genes_list))?;
+                let info = crate::commands::inspect_loci_list(genes_list.clone())?;
+                if !info.looks_valid {
+                    return Err(Error::InvalidInput(
+                        "제거할 loci 목록이 아닙니다. 한 줄에 loci 이름 하나만 있는 파일을 선택하세요.".into(),
+                    ));
+                }
+            }
+            ModuleParams::JoinProfiles { profiles_files, .. } => {
+                if profiles_files.len() < 2 {
+                    return Err(Error::InvalidInput(
+                        "합칠 결과 파일을 두 개 이상 선택하세요".into(),
+                    ));
+                }
+                for p in profiles_files {
+                    Self::check_profiles(p)?;
+                }
+            }
+            ModuleParams::SchemaEvaluator { schema_id, .. } => {
+                if schema_id.trim().is_empty() {
+                    return Err(Error::InvalidInput("스키마를 선택하세요".into()));
+                }
+            }
+            ModuleParams::AlleleCallEvaluator {
+                results_dir,
+                schema_id,
+            } => {
+                if schema_id.trim().is_empty() {
+                    return Err(Error::InvalidInput("스키마를 선택하세요".into()));
+                }
+                // 결과 폴더인지 확인한다 — results_alleles.tsv 가 있어야 한다.
+                let marker = std::path::Path::new(results_dir).join("results_alleles.tsv");
+                if !marker.is_file() {
+                    return Err(Error::InvalidInput(
+                        "AlleleCall 결과 폴더가 아닙니다 — 안에 results_alleles.tsv 가 없습니다.\nresults_<날짜시각> 폴더를 고르세요.".into(),
+                    ));
+                }
+            }
             ModuleParams::ExtractCgMLST { profiles_file, .. } => {
                 if profiles_file.trim().is_empty() {
                     return Err(Error::InvalidInput(
@@ -195,6 +239,25 @@ impl JobManager {
         self.emit_state(&job_id, JobStatus::Queued, None);
         self.maybe_start();
         Ok(job_id)
+    }
+
+    /// allelic profile 표인지 확인한다. 여러 모듈이 같은 실수를 공유하므로 한곳에 둔다.
+    fn check_profiles(path: &str) -> Result<()> {
+        if path.trim().is_empty() {
+            return Err(Error::InvalidInput(
+                "AlleleCall 결과 파일(results_alleles.tsv)을 선택하세요".into(),
+            ));
+        }
+        validate_host_path(std::path::Path::new(path))?;
+        let info = crate::commands::inspect_profiles_file(path.to_string())?;
+        if !info.looks_valid {
+            return Err(Error::InvalidInput(format!(
+                "이 파일은 allelic profile 표가 아닙니다 (첫 열이 '{}', 열 {}개).\nAlleleCall 결과 폴더의 results_alleles.tsv 를 선택하세요.",
+                info.first_column,
+                info.loci + 1
+            )));
+        }
+        Ok(())
     }
 
     /// 슬롯이 비어 있으면 다음 큐 항목을 워커 스레드에서 실행한다.
