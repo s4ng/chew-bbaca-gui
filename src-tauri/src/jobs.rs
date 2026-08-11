@@ -190,10 +190,19 @@ impl JobManager {
                     return Err(Error::InvalidInput("스키마를 선택하세요".into()));
                 }
                 // 결과 폴더인지 확인한다 — results_alleles.tsv 가 있어야 한다.
-                let marker = std::path::Path::new(results_dir).join("results_alleles.tsv");
-                if !marker.is_file() {
+                let dir = std::path::Path::new(results_dir);
+                if !dir.join("results_alleles.tsv").is_file() {
                     return Err(Error::InvalidInput(
                         "AlleleCall 결과 폴더가 아닙니다 — 안에 results_alleles.tsv 가 없습니다.\nresults_<날짜시각> 폴더를 고르세요.".into(),
+                    ));
+                }
+                // **cds_coordinates.tsv 가 없으면 이 모듈은 파이썬 예외로 죽는다.**
+                // 그 파일은 AlleleCall 이 Prodigal 로 CDS 를 예측했을 때만 나온다 —
+                // [입력이 이미 CDS 입니다] 를 켜고 돌린 결과에는 아예 없다(실측).
+                // 여기서 막지 않으면 사용자는 traceback 만 보게 된다.
+                if !dir.join("cds_coordinates.tsv").is_file() {
+                    return Err(Error::InvalidInput(
+                        "이 결과 폴더에는 cds_coordinates.tsv 가 없어 리포트를 만들 수 없습니다.\n[입력이 이미 CDS 입니다(--cds)] 를 켜고 돌린 AlleleCall 결과에는 이 파일이 생기지 않습니다. 어셈블리를 입력으로 돌린 결과 폴더를 고르세요.".into(),
                     ));
                 }
             }

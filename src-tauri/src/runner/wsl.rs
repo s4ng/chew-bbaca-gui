@@ -205,6 +205,23 @@ impl WslRunner {
         Ok(staged)
     }
 
+    /// 스테이징이 미리 만들어 둔 빈 `output` 을 도로 지운다.
+    ///
+    /// SchemaEvaluator·AlleleCallEvaluator 는 `-o` 가 **이미 있으면 아무것도 하지 않고
+    /// 거부한다** — `Output directory already exists.` 한 줄과 exit 1 이 전부다
+    /// (chewBBACA.py 의 `run_evaluate_schema`/`run_evaluate_calls`, 2026-08-11 실측).
+    /// 그래서 이 두 모듈에서는 chewBBACA 자신이 폴더를 만들게 둬야 한다.
+    ///
+    /// `rm -rf` 가 아니라 `rmdir` 인 것은 의도적이다. 비어 있을 때만 지워지므로,
+    /// 어떤 경로 착오가 있어도 남의 결과를 날리지 않는다.
+    fn drop_empty_output(&self, work: &str) -> Result<()> {
+        self.bash(&format!(
+            "rmdir {}/output 2>/dev/null || true",
+            sh_quote(work)
+        ))?;
+        Ok(())
+    }
+
     /// 실행 스크립트. 반환값의 종료 코드는 chewBBACA 자신의 것이다.
     ///
     /// `setsid --wait` 가 두 가지를 동시에 해준다 —
@@ -441,7 +458,9 @@ impl ChewieRunner for WslRunner {
             }
             ModuleParams::SchemaEvaluator { .. } => {
                 // 입력이 앱 저장소의 스키마다. 이미 ext4 안에 있으므로 복사하지 않는다.
-                self.bash(&format!("mkdir -p {}/output", sh_quote(&work)))?
+                // `output` 은 만들지 않는다 — 이 모듈은 그게 있으면 거부한다
+                // (`drop_empty_output` 참조).
+                self.bash(&format!("mkdir -p {}", sh_quote(&work)))?
                     .require_success()?;
                 String::new()
             }
@@ -510,9 +529,11 @@ impl ChewieRunner for WslRunner {
             } => {
                 args.schema = Some(format!("{}/{}/schema_seed", self.schema_root()?, schema_id));
                 args.flag = *loci_reports;
+                self.drop_empty_output(&work)?;
             }
             ModuleParams::AlleleCallEvaluator { schema_id, .. } => {
                 args.schema = Some(format!("{}/{}/schema_seed", self.schema_root()?, schema_id));
+                self.drop_empty_output(&work)?;
             }
             ModuleParams::PrepExternalSchema { ptf, .. } => {
                 // **`-o` 를 스키마 폴더가 아니라 그 안의 `schema_seed` 로 겨눈다.**
