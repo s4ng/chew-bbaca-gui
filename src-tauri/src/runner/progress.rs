@@ -25,87 +25,104 @@ use crate::models::Module;
 /// **뒤 단계의 키워드가 앞 단계 줄에 우연히 포함되지 않도록** 충분히 길게 잡는다.
 type Stage = (&'static str, f32, f32, &'static str);
 
-/// CreateSchema. 실측 로그 기준 비용의 대부분은 두 BLASTp 구간에 있다.
+/// CreateSchema. **2026-08-11 에 실제 어셈블리로 다시 잰 비중이다**
+/// (S. agalactiae 완성 게놈 32개, loci 3,130, `--cpu 8`, 총 38초).
+///
+/// 앞선 비중은 합성 CDS(2초)에서 나온 것이라 실제와 크게 달랐다. 진짜 데이터에서는
+/// **클러스터별 BLASTp 하나가 73%** 다. 나머지 단계는 다 합쳐도 10%가 안 된다.
+///
+/// 첫 단계가 둘인 것은 입력 종류에 따라 갈리기 때문이다 — 어셈블리를 넣으면 Prodigal 이
+/// 돌아 `Predicting CDSs`, `--cds` 로 넣으면 그 단계가 통째로 없고 `Renaming CDSs` 가
+/// 나온다. 한 실행에 둘 중 하나만 나오므로 같은 구간을 나눠 갖는다.
 const CREATE_SCHEMA: &[Stage] = &[
-    ("renaming cdss for", 0.00, 0.05, "입력 CDS 정리 중"),
-    ("identifying distinct cdss", 0.05, 0.05, "중복 CDS 제거 중"),
-    ("translating", 0.10, 0.10, "CDS 번역 중"),
+    ("predicting cdss for", 0.00, 0.06, "유전자 예측 중"),
+    ("renaming cdss for", 0.00, 0.06, "입력 CDS 정리 중"),
+    ("identifying distinct cdss", 0.06, 0.02, "중복 CDS 제거 중"),
+    ("translating", 0.08, 0.01, "CDS 번역 중"),
     (
         "identifying distinct proteins",
-        0.20,
-        0.05,
+        0.09,
+        0.01,
         "중복 단백질 제거 중",
     ),
-    ("clustering proteins", 0.25, 0.15, "단백질 클러스터링 중"),
+    ("clustering proteins", 0.10, 0.03, "단백질 클러스터링 중"),
     (
         "performing all-vs-all blastp",
-        0.40,
-        0.35,
+        0.13,
+        0.73,
         "클러스터별 BLASTp 중",
     ),
-    ("performing final blastp", 0.75, 0.20, "최종 BLASTp 중"),
-    ("creating schema seed", 0.95, 0.04, "스키마 생성 중"),
+    ("performing final blastp", 0.86, 0.12, "최종 BLASTp 중"),
+    ("creating schema seed", 0.98, 0.01, "스키마 생성 중"),
 ];
 
-/// AlleleCall. 단계 수가 훨씬 많고, 무거운 곳은 대표 서열 정렬과 분류다.
+/// AlleleCall. **2026-08-11 에 실제 어셈블리로 다시 잰 비중이다**
+/// (같은 게놈 32개를 위 스키마로 부름, `--cpu 8`, 총 1분 30초).
+///
+/// 여기서도 한 단계가 압도한다 — **대표 서열 정렬이 77%** 다. 앞의 여덟 단계를 다
+/// 합쳐도 10%에 못 미치므로, 옛 표처럼 앞쪽에 넉넉히 배분하면 막대가 초반에 훌쩍
+/// 올라갔다가 정작 오래 걸리는 구간에서 멈춰 있는 것처럼 보인다.
+///
+/// CreateSchema 와 마찬가지로 첫 CDS 단계가 입력 종류에 따라 갈린다.
 const ALLELE_CALL: &[Stage] = &[
     (
         "determining allele size mode",
         0.00,
-        0.03,
+        0.01,
         "스키마 사전 계산 중",
     ),
-    ("creating hash tables", 0.03, 0.04, "해시 테이블 생성 중"),
-    ("renaming cdss for", 0.07, 0.03, "입력 CDS 정리 중"),
-    ("identifying distinct cdss", 0.10, 0.03, "중복 CDS 제거 중"),
+    ("creating hash tables", 0.01, 0.01, "해시 테이블 생성 중"),
+    ("predicting cdss for", 0.02, 0.03, "유전자 예측 중"),
+    ("renaming cdss for", 0.02, 0.03, "입력 CDS 정리 중"),
+    ("identifying distinct cdss", 0.05, 0.01, "중복 CDS 제거 중"),
     (
         "searching for cds exact matches",
-        0.13,
-        0.07,
+        0.06,
+        0.01,
         "CDS 정확 일치 검색 중",
     ),
-    ("translating", 0.20, 0.08, "CDS 번역 중"),
+    ("translating", 0.07, 0.01, "CDS 번역 중"),
     (
         "identifying distinct proteins",
-        0.28,
-        0.03,
+        0.08,
+        0.01,
         "중복 단백질 제거 중",
     ),
     (
         "searching for protein exact matches",
-        0.31,
-        0.06,
+        0.09,
+        0.01,
         "단백질 정확 일치 검색 중",
     ),
     (
         "determining blastp self-score",
-        0.37,
-        0.06,
+        0.10,
+        0.05,
         "self-score 계산 중",
     ),
-    ("clustering proteins", 0.43, 0.12, "단백질 클러스터링 중"),
+    ("clustering proteins", 0.15, 0.02, "단백질 클러스터링 중"),
     (
         "aligning cluster representatives",
-        0.55,
-        0.25,
+        0.17,
+        0.72,
         "대표 서열 정렬 중",
     ),
     (
         "classifying high-scoring matches",
-        0.80,
-        0.12,
+        0.89,
+        0.07,
         "allele 분류 중",
     ),
     (
         "assigning allele identifiers",
-        0.92,
-        0.04,
+        0.96,
+        0.02,
         "allele 번호 부여 중",
     ),
     (
         "creating file with the allelic profiles",
-        0.96,
-        0.03,
+        0.98,
+        0.01,
         "결과 기록 중",
     ),
 ];
@@ -410,6 +427,93 @@ mod tests {
         assert!(prev >= 0.92, "마지막 진행률이 {prev} 에 그쳤다");
     }
 
+    /// 2026-08-11 실측, **어셈블리 입력**(`--cds` 없음)의 단계 헤더.
+    /// `--cds` 로그(위)에는 없는 `Predicting CDSs` 가 여기 있다 — 표를 합성 데이터로만
+    /// 만들면 이 단계가 통째로 빠진다. 실제로 그랬다.
+    const CREATE_SCHEMA_ASSEMBLY_LOG: &[&str] = &[
+        "Number of inputs: 32",
+        "Predicting CDSs for 32 inputs...",
+        " [====================] 100%",
+        "Identifying distinct CDSs...",
+        "Translating 20599 CDS...",
+        "Identifying distinct proteins...",
+        "Clustering proteins...",
+        "Performing all-vs-all BLASTp per cluster...",
+        " [==========          ] 50%",
+        " [====================] 100%",
+        "Performing final BLASTp...",
+        " [====================] 100%",
+        "Creating schema seed in /tmp/real/schema",
+    ];
+
+    /// 같은 실행의 AlleleCall 단계 헤더.
+    const ALLELE_CALL_ASSEMBLY_LOG: &[&str] = &[
+        "Determining allele size mode for all loci...",
+        "Creating hash tables...",
+        "Predicting CDSs for 32 inputs...",
+        "Identifying distinct CDSs...",
+        "Searching for CDS exact matches...",
+        "Translating 17469 CDSs...",
+        "Identifying distinct proteins...",
+        "Searching for Protein exact matches...",
+        "Translating schema representative alleles...",
+        "Determining BLASTp self-score for each representative...",
+        "Clustering proteins...",
+        "Aligning cluster representatives against clustered proteins...",
+        " [==========          ] 50%",
+        " [====================] 100%",
+        "Classifying high-scoring matches...",
+        "Assigning allele identifiers to inferred alleles...",
+        "Creating file with the allelic profiles (results_alleles.tsv)...",
+    ];
+
+    #[test]
+    fn assembly_input_logs_advance_monotonically() {
+        for (module, log, floor) in [
+            (Module::CreateSchema, CREATE_SCHEMA_ASSEMBLY_LOG, 0.98),
+            (Module::AlleleCall, ALLELE_CALL_ASSEMBLY_LOG, 0.98),
+        ] {
+            let seen = run(module, log);
+            assert!(!seen.is_empty(), "{module:?}: 아무것도 인식하지 못했다");
+            let mut prev = 0.0;
+            for (v, _) in &seen {
+                assert!(*v > prev, "{module:?} 되감김: {prev} → {v}");
+                prev = *v;
+            }
+            assert!(prev >= floor, "{module:?} 마지막 진행률이 {prev} 에 그쳤다");
+        }
+    }
+
+    #[test]
+    fn gene_prediction_is_a_stage_of_its_own() {
+        // 어셈블리 입력에서만 나오는 단계다. 여기가 빠지면 Prodigal 이 도는 동안
+        // (32개 게놈에 2.4초, 큰 데이터셋에서는 더) 막대가 0에 머문다.
+        let mut p = ProgressParser::for_module(Module::CreateSchema);
+        // 첫 단계는 구간 시작이 0.00 이라 헤더만으로는 값이 오르지 않는다
+        // (변화가 없으면 이벤트를 내지 않는 것이 파서의 규칙이다). 막대가 붙는다.
+        p.observe("Predicting CDSs for 32 inputs...");
+        let (v, label) = p.observe(" [==========          ] 50%").unwrap();
+        assert_eq!(label, "유전자 예측 중");
+        assert!((v - 0.03).abs() < 0.005, "got {v}");
+    }
+
+    #[test]
+    fn the_heaviest_stage_gets_the_widest_span() {
+        // 실측에서 CreateSchema 는 클러스터별 BLASTp 가 73%, AlleleCall 은 대표 서열
+        // 정렬이 77% 였다. 이 둘이 표에서 가장 넓지 않으면 비중이 다시 어긋난 것이다.
+        for (table, expected) in [
+            (CREATE_SCHEMA, "클러스터별 BLASTp 중"),
+            (ALLELE_CALL, "대표 서열 정렬 중"),
+        ] {
+            let widest = table
+                .iter()
+                .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap())
+                .unwrap();
+            assert_eq!(widest.3, expected, "가장 넓은 구간이 바뀌었다");
+            assert!(widest.2 >= 0.7, "{expected} 의 폭이 {} 로 좁다", widest.2);
+        }
+    }
+
     /// 2026-08-11 실측. loci 3127개 스키마에 `--loci-reports` 를 켠 경우.
     const SCHEMA_EVALUATOR_LOG: &[&str] = &[
         "Started at: 2026-08-11T10:45:55",
@@ -536,7 +640,7 @@ mod tests {
         // 막대가 붙지 않는 단계가 많다. 헤더만으로도 구간 시작까지는 올라가야 한다.
         let mut p = ProgressParser::for_module(Module::CreateSchema);
         let (v, label) = p.observe("Performing final BLASTp...").unwrap();
-        assert!((v - 0.75).abs() < 0.001, "got {v}");
+        assert!((v - 0.86).abs() < 0.001, "got {v}");
         assert_eq!(label, "최종 BLASTp 중");
     }
 
@@ -545,8 +649,8 @@ mod tests {
         let mut p = ProgressParser::for_module(Module::CreateSchema);
         p.observe("Performing all-vs-all BLASTp per cluster...");
         let (v, label) = p.observe(" [==========          ] 50%").unwrap();
-        // 0.40 시작 + 0.35 폭의 절반
-        assert!((v - 0.575).abs() < 0.01, "got {v}");
+        // 0.13 시작 + 0.73 폭의 절반
+        assert!((v - 0.495).abs() < 0.01, "got {v}");
         assert_eq!(label, "클러스터별 BLASTp 중");
     }
 
