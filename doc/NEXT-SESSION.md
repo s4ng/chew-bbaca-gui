@@ -79,7 +79,10 @@
 - 스모크 테스트 잔재가 배포판 안에 남아 있다: `/tmp/smoke/`(합성 입력·스키마·결과),
   `/tmp/gen.py`, `/tmp/pgidtest.sh`. 지워도 무방하다.
 - `%LOCALAPPDATA%\ChewieApp\` 은 스모크 테스트로 이미 생성되어 있다 (정상, 앱이 재사용한다).
-- git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`). 원격은 아직 없다.
+- git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`).
+  원격은 <https://github.com/s4ng/chew-bbaca-gui> (**공개**). `gh` 는 `s4ng` 로 인증돼 있다.
+  릴리스는 **태그에 `v` 를 붙이지 않고**(`0.2.0`) 제목에만 붙인다(`v0.2.0`) — 기존 관례다.
+  인스톨러는 릴리스 자산으로 직접 올린다 (510MB, GitHub 자산 한도 2GiB 안).
   `.gitattributes` 가 `rootfs/*.sh` 를 LF 로 고정한다 — **이 설정을 풀면 Windows 체크아웃에서
   CRLF 로 바뀌어 rootfs 이미지 안의 `/etc/profile.d/chewie.sh` 가 깨진다.**
 
