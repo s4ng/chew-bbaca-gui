@@ -122,8 +122,17 @@ pub struct JobSpec {
 ///
 /// `module` 을 태그로 쓰므로 이 열거형 자체가 곧 모듈 판정이다 — 별도의 `module`
 /// 필드를 두면 둘이 어긋날 수 있다.
+/// **`rename_all` 과 `rename_all_fields` 는 서로 다른 것을 가리킨다.**
+/// 열거형에서 `rename_all` 은 *variant 이름*을, `rename_all_fields` 는 *필드 이름*을
+/// 바꾼다. variant 는 `Module` 및 프런트와 같은 PascalCase(`"CreateSchema"`)여야 하고,
+/// 필드는 나머지 타입들처럼 camelCase(`inputDir`)여야 한다.
+/// 둘을 헷갈려 `rename_all` 만 붙이면 **모든 모듈의 제출이 깨진다** (실제로 그랬다).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "module", rename_all = "camelCase")]
+#[serde(
+    tag = "module",
+    rename_all = "PascalCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum ModuleParams {
     CreateSchema {
         /// 어셈블리(FASTA) 폴더
@@ -288,3 +297,79 @@ pub struct ProgressEvent {
 pub const EVENT_LOG: &str = "job://log";
 pub const EVENT_STATE: &str = "job://state";
 pub const EVENT_PROGRESS: &str = "job://progress";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **프런트가 실제로 보내는 JSON 을 그대로 넣는다.**
+    ///
+    /// `src/lib/types.ts` 의 `JobSpec` 유니온과 1:1 이어야 하며, 어긋나면
+    /// `jobs_submit` 이 "unknown variant" 로 거절한다 — 실제로 그런 회귀가 있었다
+    /// (`rename_all` 이 필드가 아니라 variant 를 바꾼다는 것을 놓쳤다).
+    /// 이 테스트는 그 조합을 문자열 수준에서 고정한다.
+    fn assert_roundtrip(json: &str, expect: Module) {
+        let spec: JobSpec = serde_json::from_str(json)
+            .unwrap_or_else(|e| panic!("프런트 JSON 을 받지 못한다: {e}\n{json}"));
+        assert_eq!(spec.module(), expect);
+
+        // 다시 직렬화한 것도 프런트가 보낸 것과 같은 모양이어야 한다.
+        // DB 의 args 로 저장됐다가 조정 때 다시 읽히기 때문이다.
+        let back = serde_json::to_string(&spec).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&back).unwrap();
+        let original: serde_json::Value = serde_json::from_str(json).unwrap();
+        for (k, v) in original.as_object().unwrap() {
+            assert_eq!(parsed.get(k), Some(v), "필드 `{k}` 가 왕복에서 어긋났다");
+        }
+    }
+
+    #[test]
+    fn create_schema_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"","cpu":null,"module":"CreateSchema",
+                "inputDir":"C:/genomes","schemaName":"내 스키마",
+                "ptf":null,"cdsInput":false}"#,
+            Module::CreateSchema,
+        );
+    }
+
+    #[test]
+    fn allele_call_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":8,"module":"AlleleCall",
+                "inputDir":"C:/genomes","schemaId":"s-1234abcd",
+                "lociList":"C:/cgMLSTschema95.txt","cdsInput":true}"#,
+            Module::AlleleCall,
+        );
+    }
+
+    #[test]
+    fn extract_cgmlst_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"C:/out","cpu":null,"module":"ExtractCgMLST",
+                "profilesFile":"C:/results_alleles.tsv","thresholds":"0.95 0.99 1"}"#,
+            Module::ExtractCgMLST,
+        );
+    }
+
+    #[test]
+    fn prep_external_schema_json_from_the_form() {
+        assert_roundtrip(
+            r#"{"outputDir":"","cpu":4,"module":"PrepExternalSchema",
+                "schemaDir":"C:/external","schemaName":"Ridom cgMLST","ptf":null}"#,
+            Module::PrepExternalSchema,
+        );
+    }
+
+    #[test]
+    fn module_tag_is_pascal_case_like_the_module_enum() {
+        // variant 이름이 Module 의 직렬화 형태와 같아야 한다. 프런트는 하나만 안다.
+        let spec: JobSpec = serde_json::from_str(
+            r#"{"outputDir":"","cpu":null,"module":"CreateSchema",
+                "inputDir":"x","schemaName":"n","ptf":null,"cdsInput":false}"#,
+        )
+        .unwrap();
+        let json = serde_json::to_value(&spec).unwrap();
+        assert_eq!(json["module"], serde_json::to_value(Module::CreateSchema).unwrap());
+    }
+}
