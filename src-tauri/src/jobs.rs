@@ -32,6 +32,9 @@ use crate::util::now_iso;
 /// 고아 작업을 지켜볼 때의 폴링 간격. 40분짜리 작업 기준이므로 촘촘할 필요가 없다.
 const ADOPT_POLL: Duration = Duration::from_secs(5);
 
+/// 외부 스키마 폴더를 알아볼 때 세는 확장자. chewBBACA 가 받아들이는 것과 같다.
+const FASTA_EXT: [&str; 6] = ["fasta", "fa", "fna", "ffn", "faa", "frn"];
+
 pub struct JobManager {
     app: AppHandle,
     db: Arc<Db>,
@@ -119,6 +122,35 @@ impl JobManager {
                             if info.tabbed { " (탭으로 나뉜 표입니다)" } else { " (비어 있습니다)" }
                         )));
                     }
+                }
+            }
+            ModuleParams::PrepExternalSchema {
+                schema_dir,
+                schema_name,
+                ptf,
+            } => {
+                if schema_name.trim().is_empty() {
+                    return Err(Error::InvalidInput("스키마 이름을 입력하세요".into()));
+                }
+                // 들여올 폴더가 정말 스키마인지 여기서 본다 — loci FASTA 가 하나도
+                // 없으면 chewBBACA 가 한참 돌다 빈 스키마를 내놓는다.
+                let dir = std::path::Path::new(schema_dir);
+                let fasta = std::fs::read_dir(dir)
+                    .map_err(|e| Error::InvalidInput(format!("폴더를 읽을 수 없습니다: {e}")))?
+                    .flatten()
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .is_some_and(|x| FASTA_EXT.iter().any(|k| x.eq_ignore_ascii_case(k)))
+                    })
+                    .count();
+                if fasta == 0 {
+                    return Err(Error::InvalidInput(
+                        "이 폴더에는 FASTA 파일이 없습니다.\n외부 스키마는 loci 마다 FASTA 파일 하나로 되어 있어야 합니다. 압축을 푼 스키마 폴더를 그대로 고르세요.".into(),
+                    ));
+                }
+                if let Some(p) = ptf.as_deref().filter(|s| !s.trim().is_empty()) {
+                    validate_host_path(std::path::Path::new(p))?;
                 }
             }
             ModuleParams::ExtractCgMLST { profiles_file, .. } => {
@@ -645,7 +677,7 @@ impl JobManager {
                 // 디렉터리만 보고 복구하면서 **이름과 loci 수를 잃는다.**
                 if populated {
                     if let Some(s) = spec.as_ref() {
-                        if s.module() == Module::CreateSchema {
+                        if s.module().produces_schema() {
                             me.register_schema_from_disk(&job_id, s);
                         }
                     }

@@ -191,6 +191,24 @@ WSL 안에서 직접 CreateSchema/AlleleCall 을 완주시켰다(위 표). 덕�
 > 산출물이 `~/schemas/{id}` 로 가므로 **진짜 고아가 된 CreateSchema 는 성공했어도
 > 실패로 확정된다.** ④ 를 검증할 때 이것부터 고쳐야 한다.
 
+### ⑤-0 실행해봐야 하는 것 — **PrepExternalSchema**
+
+2026-08-10 에 구현했지만 **한 번도 실행하지 못했다.** 그 시점에 `chewie-env` 를
+제거한 상태여서 `--help` 조차 못 봤고, 인자와 출력 구조를 문서와 저장소 소스로만
+확인했다. 확인 근거와 함께 남긴다.
+
+- `--cpu` 있음 (readthedocs 옵션 목록)
+- **출력 구조가 CreateSchema 와 다르다.** `-o` 아래에 `schema_seed/` 를 만들지 않고
+  loci FASTA·`short/`·`.schema_config` 를 **바로** 푼다
+  (`tests/data/prepexternalschema_data/.../expected_results` 로 확인).
+  그래서 `-o` 를 `{스키마}/schema_seed` 로 겨눠 앱의 나머지와 맞물리게 했다.
+  **이 가정이 틀리면 loci 수가 0 으로 잡히고 AlleleCall 이 스키마를 못 찾는다.**
+- `progress.rs` 의 `PREP_EXTERNAL` 단계표는 **유일하게 실측하지 않은 표다.**
+  문구가 안 맞으면 진행률만 멈추고 작업은 정상 진행된다.
+
+검증 방법: 공인 스키마를 하나 받아 들여온 뒤 [스키마] 화면에 loci 수가 제대로
+뜨는지, 그 스키마로 AlleleCall 이 도는지 본다.
+
 ### ⑤ 그다음 (v0.2 범위)
 
 - ~~`ExtractCgMLST` 추가~~ ✅ **2026-08-10 구현 완료.** 다만 **앱에서 아직 실행해보지 않았다.**

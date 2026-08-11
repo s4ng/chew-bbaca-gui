@@ -63,6 +63,17 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
                 v.push("--cds".into());
             }
         }
+        Module::PrepExternalSchema => {
+            // `-g` 는 어셈블리가 아니라 **변환할 스키마 폴더**다.
+            v.push("-g".into());
+            v.push(a.input.clone());
+            v.push("-o".into());
+            v.push(a.output.clone());
+            if let Some(ptf) = &a.ptf {
+                v.push("--ptf".into());
+                v.push(ptf.clone());
+            }
+        }
         Module::ExtractCgMLST => {
             // 입력이 폴더가 아니라 AlleleCall 결과 TSV 파일 하나다.
             v.push("-i".into());
@@ -122,6 +133,20 @@ mod tests {
         let v = build_argv(Module::AlleleCall, &args());
         let g = v.iter().position(|x| x == "-g").unwrap();
         assert_eq!(v[g + 1], "/home/chewie/schemas/s1/schema_seed");
+    }
+
+    #[test]
+    fn prep_external_schema_uses_g_for_the_source_schema() {
+        // 이 모듈만 `-g` 가 스키마 입력이다. AlleleCall 의 `-g`(대상 스키마)와 뜻이 다르다.
+        let mut a = args();
+        a.ptf = Some("/home/chewie/x.trn".into());
+        let v = build_argv(Module::PrepExternalSchema, &a);
+        assert_eq!(v[1], "PrepExternalSchema");
+        let g = v.iter().position(|x| x == "-g").unwrap();
+        assert_eq!(v[g + 1], a.input);
+        assert!(v.contains(&"--ptf".to_string()));
+        // 문서로 확인함 — 이 모듈에는 --cpu 가 있다.
+        assert!(v.contains(&"--cpu".to_string()));
     }
 
     #[test]

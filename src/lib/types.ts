@@ -2,7 +2,11 @@
 // 필드 이름이 어긋나면 조용히 undefined 가 되므로, Rust 구조체를 고칠 때
 // 반드시 이 파일도 함께 고친다.
 
-export type Module = "CreateSchema" | "AlleleCall" | "ExtractCgMLST";
+export type Module =
+  | "CreateSchema"
+  | "AlleleCall"
+  | "ExtractCgMLST"
+  | "PrepExternalSchema";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -56,6 +60,13 @@ export type JobSpec =
       profilesFile: string;
       /** --t. 비우면 기본값(0.95 / 0.99 / 1)을 모두 계산한다 */
       thresholds?: string | null;
+    })
+  | (JobSpecCommon & {
+      module: "PrepExternalSchema";
+      /** 들여올 외부 스키마 폴더 (loci 마다 FASTA 하나) */
+      schemaDir: string;
+      schemaName: string;
+      ptf?: string | null;
     });
 
 export interface SchemaInfo {

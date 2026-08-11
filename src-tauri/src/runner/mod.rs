@@ -70,6 +70,7 @@ pub fn schema_id_for(job_id: &str, spec: &JobSpec) -> String {
 pub fn schema_name_of(spec: &JobSpec) -> &str {
     match &spec.params {
         crate::models::ModuleParams::CreateSchema { schema_name, .. }
+        | crate::models::ModuleParams::PrepExternalSchema { schema_name, .. }
             if !schema_name.trim().is_empty() =>
         {
             schema_name

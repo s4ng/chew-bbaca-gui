@@ -4,6 +4,7 @@ export const MODULE_LABEL: Record<Module, string> = {
   CreateSchema: "스키마 생성",
   AlleleCall: "Allele calling",
   ExtractCgMLST: "core genome 추출",
+  PrepExternalSchema: "외부 스키마 들여오기",
 };
 
 /**
@@ -24,11 +25,24 @@ export interface ModuleInfo {
   caution?: string;
 }
 
-/** 표준 파이프라인에서의 위치. 순서가 실제로 의미를 갖는 곳이라 번호를 붙인다. */
+/**
+ * 표준 파이프라인에서의 위치. 순서가 실제로 의미를 갖는 곳이라 번호를 붙인다.
+ *
+ * `PrepExternalSchema` 는 4단계가 아니라 **1단계의 대안**이다 — 스키마를 직접
+ * 만드는 대신 남이 만든 것을 들여온다. 그래서 같은 번호를 준다.
+ */
 export const MODULE_STEP: Record<Module, number> = {
   CreateSchema: 1,
+  PrepExternalSchema: 1,
   AlleleCall: 2,
   ExtractCgMLST: 3,
+};
+
+/** 단계 표시에 쓸 이름. 1단계는 두 모듈이 공유하므로 중립적으로 적는다. */
+export const STEP_LABEL: Record<number, string> = {
+  1: "1. 스키마 준비",
+  2: "2. Allele calling",
+  3: "3. core genome 추출",
 };
 
 export const MODULE_INFO: Record<Module, ModuleInfo> = {
@@ -49,6 +63,15 @@ export const MODULE_INFO: Record<Module, ModuleInfo> = {
     next: "ExtractCgMLST 로 core genome 을 추려야 균주 비교에 쓸 수 있는 표가 됩니다.",
     caution:
       "처음 보는 서열은 새 allele 로 등록되어 스키마에 계속 추가됩니다. 스키마가 실행할 때마다 자라는 것은 정상입니다.",
+  },
+  PrepExternalSchema: {
+    summary:
+      "이미 만들어져 있는 스키마를 chewBBACA 가 쓸 수 있는 형태로 바꿔 들여옵니다. 같은 균종에 공인된 스키마가 있다면 직접 만드는 것보다 이쪽이 낫습니다 — 남의 결과와 숫자를 맞춰볼 수 있기 때문입니다.",
+    needs: "loci 마다 FASTA 파일 하나로 된 스키마 폴더",
+    gives: "변환된 스키마. CreateSchema 로 만든 것과 똑같이 쓰입니다",
+    next: "들여온 스키마로 AlleleCall 을 실행합니다.",
+    caution:
+      "이 앱이 [내보내기] 로 만든 폴더를 되돌리는 것이라면 이 모듈이 아니라 [스키마] 화면의 [불러오기] 를 쓰세요. 그쪽은 변환 없이 그대로 복원합니다.",
   },
   ExtractCgMLST: {
     summary:

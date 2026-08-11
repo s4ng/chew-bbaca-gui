@@ -17,6 +17,9 @@ pub enum Module {
     /// AlleleCall 결과에서 core genome 을 추린다. 입력이 **어셈블리 폴더가 아니라
     /// TSV 파일 하나**라 다른 두 모듈과 입력 모양이 다르다.
     ExtractCgMLST,
+    /// 외부 스키마를 chewBBACA 형식으로 변환해 앱 저장소에 등록한다.
+    /// CreateSchema 와 같은 자리(파이프라인 1단계)를 대신한다.
+    PrepExternalSchema,
 }
 
 impl Module {
@@ -26,6 +29,7 @@ impl Module {
             Module::CreateSchema => "CreateSchema",
             Module::AlleleCall => "AlleleCall",
             Module::ExtractCgMLST => "ExtractCgMLST",
+            Module::PrepExternalSchema => "PrepExternalSchema",
         }
     }
 
@@ -34,17 +38,24 @@ impl Module {
             "CreateSchema" => Some(Module::CreateSchema),
             "AlleleCall" => Some(Module::AlleleCall),
             "ExtractCgMLST" => Some(Module::ExtractCgMLST),
+            "PrepExternalSchema" => Some(Module::PrepExternalSchema),
             _ => None,
         }
     }
 
     /// 결과 폴더가 반드시 있어야 하는가.
     ///
-    /// CreateSchema 는 산출물인 스키마를 앱 저장소에 넣으므로 회수할 것이 없다.
+    /// 스키마를 만드는 모듈은 산출물을 앱 저장소에 넣으므로 회수할 것이 없다.
     /// 그런데도 폴더를 필수로 받으면 사용자는 **빈 폴더를 열어보고 실패했다고 생각한다.**
     /// 그래서 선택으로 두고, 지정한 경우에만 실행 로그 사본을 남긴다.
     pub fn requires_output_dir(self) -> bool {
-        !matches!(self, Module::CreateSchema)
+        !self.produces_schema()
+    }
+
+    /// 산출물이 앱 저장소의 스키마인가. 그렇다면 `-o` 를 스키마 경로로 겨누고
+    /// 끝난 뒤 DB 에 등록해야 한다.
+    pub fn produces_schema(self) -> bool {
+        matches!(self, Module::CreateSchema | Module::PrepExternalSchema)
     }
 }
 
@@ -144,6 +155,14 @@ pub enum ModuleParams {
         #[serde(default)]
         thresholds: Option<String>,
     },
+    PrepExternalSchema {
+        /// 들여올 외부 스키마 폴더. loci 마다 FASTA 파일 하나가 들어 있다.
+        schema_dir: String,
+        /// 앱 저장소에 등록될 표시 이름
+        schema_name: String,
+        #[serde(default)]
+        ptf: Option<String>,
+    },
 }
 
 impl JobSpec {
@@ -152,14 +171,19 @@ impl JobSpec {
             ModuleParams::CreateSchema { .. } => Module::CreateSchema,
             ModuleParams::AlleleCall { .. } => Module::AlleleCall,
             ModuleParams::ExtractCgMLST { .. } => Module::ExtractCgMLST,
+            ModuleParams::PrepExternalSchema { .. } => Module::PrepExternalSchema,
         }
     }
 
-    /// 어셈블리 폴더를 쓰는 모듈이면 그 경로. 아니면 `None`.
+    /// **폴더**를 입력으로 받는 모듈이면 그 경로. ext4 로 통째로 복사할 대상이다.
+    ///
+    /// PrepExternalSchema 의 입력은 어셈블리가 아니라 스키마 폴더지만, loci 마다
+    /// FASTA 파일 하나씩 수천 개가 들어 있어 9p 위에서 다루면 안 되는 것은 같다.
     pub fn input_dir(&self) -> Option<&str> {
         match &self.params {
             ModuleParams::CreateSchema { input_dir, .. }
             | ModuleParams::AlleleCall { input_dir, .. } => Some(input_dir),
+            ModuleParams::PrepExternalSchema { schema_dir, .. } => Some(schema_dir),
             ModuleParams::ExtractCgMLST { .. } => None,
         }
     }
@@ -168,7 +192,16 @@ impl JobSpec {
         match self.params {
             ModuleParams::CreateSchema { cds_input, .. }
             | ModuleParams::AlleleCall { cds_input, .. } => cds_input,
-            ModuleParams::ExtractCgMLST { .. } => false,
+            _ => false,
+        }
+    }
+
+    /// 스키마를 만드는 모듈의 Prodigal training file.
+    pub fn ptf(&self) -> Option<&str> {
+        match &self.params {
+            ModuleParams::CreateSchema { ptf, .. }
+            | ModuleParams::PrepExternalSchema { ptf, .. } => ptf.as_deref(),
+            _ => None,
         }
     }
 }

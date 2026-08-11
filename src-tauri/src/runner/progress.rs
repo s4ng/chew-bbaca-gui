@@ -125,6 +125,14 @@ const EXTRACT_CGMLST: &[Stage] = &[
     ("html file with cgmlst", 0.90, 0.09, "리포트 생성 중"),
 ];
 
+/// PrepExternalSchema. **실측하지 않은 유일한 표다** — chewie-env 없이 구현했다.
+/// 문구가 안 맞으면 진행률만 멈추고 작업은 정상 진행된다(설계상 그렇게 되어 있다).
+/// 실제 로그를 얻으면 다른 표들처럼 교정한다.
+const PREP_EXTERNAL: &[Stage] = &[
+    ("adapting schema", 0.05, 0.85, "스키마 변환 중"),
+    ("adapted schema", 0.90, 0.09, "마무리 중"),
+];
+
 fn percent_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(\d{1,3})\s*%").expect("percent regex"))
@@ -153,6 +161,7 @@ impl ProgressParser {
                 Module::CreateSchema => CREATE_SCHEMA,
                 Module::AlleleCall => ALLELE_CALL,
                 Module::ExtractCgMLST => EXTRACT_CGMLST,
+                Module::PrepExternalSchema => PREP_EXTERNAL,
             },
             stage: usize::MAX,
             last: 0.0,

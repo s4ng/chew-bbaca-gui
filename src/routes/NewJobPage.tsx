@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
-import { MODULE_INFO, MODULE_LABEL, MODULE_STEP } from "../lib/format";
+import { MODULE_INFO, MODULE_STEP, STEP_LABEL } from "../lib/format";
 import {
   backendStatus,
   inspectInputDir,
@@ -22,7 +22,8 @@ import {
   type SchemaInfo,
 } from "../lib/types";
 
-const PIPELINE: Module[] = ["CreateSchema", "AlleleCall", "ExtractCgMLST"];
+/** 단계는 셋이다. 1단계는 CreateSchema 와 PrepExternalSchema 가 나눠 갖는다. */
+const PIPELINE_STEPS = [1, 2, 3];
 
 /**
  * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
@@ -37,9 +38,9 @@ function ModuleGuide({ module }: { module: Module }) {
   return (
     <div className="module-info">
       <div className="steps" aria-label="일반적인 실행 순서">
-        {PIPELINE.map((m) => (
-          <span key={m} className={`step ${m === module ? "on" : ""}`}>
-            {MODULE_STEP[m]}. {MODULE_LABEL[m]}
+        {PIPELINE_STEPS.map((n) => (
+          <span key={n} className={`step ${n === step ? "on" : ""}`}>
+            {STEP_LABEL[n]}
           </span>
         ))}
       </div>
@@ -180,7 +181,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           ? { ...common, module, inputDir, schemaName, ptf: ptf || null, cdsInput }
           : module === "AlleleCall"
             ? { ...common, module, inputDir, schemaId, lociList: lociList || null, cdsInput }
-            : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
+            : module === "PrepExternalSchema"
+              ? { ...common, module, schemaDir: inputDir, schemaName, ptf: ptf || null }
+              : { ...common, module, profilesFile, thresholds: thresholds.trim() || null };
       await jobsSubmit(spec);
       onSubmitted();
     } catch (e) {
@@ -190,10 +193,11 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     }
   };
 
-  // CreateSchema 는 산출물이 앱 저장소로 가므로 결과 폴더가 선택 항목이다.
+  // 스키마를 만드는 모듈은 산출물이 앱 저장소로 가므로 결과 폴더가 선택 항목이다.
+  const producesSchema = module === "CreateSchema" || module === "PrepExternalSchema";
   const ready =
-    (module === "CreateSchema" || outputDir !== "") &&
-    (module === "CreateSchema"
+    (producesSchema || outputDir !== "") &&
+    (producesSchema
       ? inputDir !== "" && schemaName.trim() !== ""
       : module === "AlleleCall"
         ? inputDir !== "" && schemaId !== ""
@@ -226,6 +230,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             <option value="CreateSchema">CreateSchema — 어셈블리로부터 wgMLST 스키마 생성</option>
             <option value="AlleleCall">AlleleCall — 균주별 allelic profile 결정</option>
             <option value="ExtractCgMLST">ExtractCgMLST — allele 결과에서 core genome 추출</option>
+            <option value="PrepExternalSchema">
+              PrepExternalSchema — 외부 스키마를 변환해 들여오기
+            </option>
           </select>
         </div>
 
@@ -234,7 +241,26 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
 
       <div className="card">
 
-        {module === "ExtractCgMLST" ? (
+        {module === "PrepExternalSchema" ? (
+          <div className="field">
+            <label htmlFor="input">외부 스키마 폴더</label>
+            <div className="row">
+              <input
+                id="input"
+                type="text"
+                value={inputDir}
+                readOnly
+                placeholder="loci FASTA 가 들어 있는 폴더"
+              />
+              <button onClick={() => void pickDir(setInputDir)}>찾아보기</button>
+            </div>
+            <div className="hint">
+              {inputInfo
+                ? `파일 ${inputInfo.totalFiles}개 (FASTA로 보이는 파일 ${inputInfo.fastaFiles}개)`
+                : "loci 하나당 FASTA 파일 하나로 되어 있어야 합니다. 압축을 푼 스키마 폴더를 그대로 고르세요."}
+            </div>
+          </div>
+        ) : module === "ExtractCgMLST" ? (
           <div className="field">
             <label htmlFor="profiles">AlleleCall 결과 파일</label>
             <div className="row">
@@ -366,6 +392,39 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           </>
         )}
 
+        {module === "PrepExternalSchema" && (
+          <>
+            <div className="field">
+              <label htmlFor="schemaName">스키마 이름</label>
+              <input
+                id="schemaName"
+                type="text"
+                value={schemaName}
+                onChange={(e) => setSchemaName(e.target.value)}
+                placeholder="예: Listeria cgMLST (Ridom)"
+              />
+              <div className="hint">
+                목록에 표시될 이름입니다. 어디서 가져온 스키마인지 적어두면 나중에 구분하기
+                좋습니다.
+              </div>
+            </div>
+            <div className="field">
+              <label htmlFor="ptf2">Prodigal training file (.trn) — 선택</label>
+              <div className="row">
+                <input id="ptf2" type="text" value={ptf} readOnly placeholder="(선택) 종별 .trn 파일" />
+                <button onClick={() => void pickFile(setPtf, "Prodigal training file", ["trn"])}>
+                  찾아보기
+                </button>
+                {ptf && <button onClick={() => setPtf("")}>지우기</button>}
+              </div>
+              <div className="hint">
+                외부 스키마에 training file 이 함께 제공됐다면 넣어주세요. 이후 AlleleCall 에서
+                계속 같은 것이 쓰입니다.
+              </div>
+            </div>
+          </>
+        )}
+
         {module === "ExtractCgMLST" && (
           <div className="field">
             <label htmlFor="thr">존재 임계값 (--t) — 선택</label>
@@ -384,8 +443,8 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
           </div>
         )}
 
-        {/* 어셈블리를 입력으로 받는 두 모듈에 공통이다. ExtractCgMLST 는 해당 없음. */}
-        {module !== "ExtractCgMLST" && (
+        {/* 어셈블리를 입력으로 받는 두 모듈에만 있다. */}
+        {(module === "CreateSchema" || module === "AlleleCall") && (
           <div className="field">
             <label className="inline-check">
               <input
@@ -403,9 +462,7 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         )}
 
         <div className="field">
-          <label htmlFor="output">
-            결과 폴더{module === "CreateSchema" ? " — 선택" : ""}
-          </label>
+          <label htmlFor="output">결과 폴더{producesSchema ? " — 선택" : ""}</label>
           <div className="row">
             <input
               id="output"
@@ -413,16 +470,16 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               value={outputDir}
               readOnly
               placeholder={
-                module === "CreateSchema" ? "(선택) 비워두어도 됩니다" : "폴더를 선택하세요"
+                producesSchema ? "(선택) 비워두어도 됩니다" : "폴더를 선택하세요"
               }
             />
             <button onClick={() => void pickDir(setOutputDir)}>찾아보기</button>
-            {module === "CreateSchema" && outputDir && (
+            {producesSchema && outputDir && (
               <button onClick={() => setOutputDir("")}>지우기</button>
             )}
           </div>
           <div className="hint">
-            {module === "CreateSchema"
+            {producesSchema
               ? "만들어진 스키마는 앱 저장소에 보관되고 [스키마] 화면에서 관리합니다. 이 폴더를 지정하면 실행 로그 사본만 남습니다 — 스키마 파일은 [스키마] → [내보내기] 로 꺼냅니다."
               : module === "AlleleCall"
                 ? "AlleleCall 결과가 이 폴더로 회수됩니다."

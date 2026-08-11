@@ -426,6 +426,21 @@ impl ChewieRunner for WslRunner {
                 // 스키마도 어셈블리도 필요 없다. 입력 TSV 는 위에서 이미 스테이징했다.
                 args.thresholds = thresholds.clone();
             }
+            ModuleParams::PrepExternalSchema { ptf, .. } => {
+                // **`-o` 를 스키마 폴더가 아니라 그 안의 `schema_seed` 로 겨눈다.**
+                // CreateSchema 는 `-o` 아래에 `schema_seed/` 를 만들지만 이 모듈은
+                // 변환된 loci FASTA 를 `-o` 바로 아래에 푼다(3.5.4 소스로 확인).
+                // 여기서 한 겹 내려주면 앱의 나머지(AlleleCall 의 -g, loci 계수,
+                // 내보내기)가 두 모듈을 구분하지 않아도 된다.
+                let schema_id = schema_id_for(job_id, spec);
+                let path = format!("{}/{}", self.schema_root()?, schema_id);
+                args.output = format!("{path}/schema_seed");
+                if let Some(p) = ptf {
+                    args.ptf = Some(self.to_backend_path(Path::new(p))?);
+                }
+                created_schema_target =
+                    Some((schema_id, schema_name_of(spec).to_string()));
+            }
         }
 
         let argv = build_argv(spec.module(), &args);
@@ -493,7 +508,7 @@ impl ChewieRunner for WslRunner {
     fn output_produced(&self, job_id: &str, spec: &JobSpec) -> Result<bool> {
         // CreateSchema 의 산출물은 작업 디렉터리가 아니라 스키마 저장소에 있다.
         // 여기를 작업 디렉터리로 보면 성공한 고아 작업이 전부 실패로 확정된다.
-        let target = if spec.module() == Module::CreateSchema {
+        let target = if spec.module().produces_schema() {
             format!(
                 "{}/{}/schema_seed",
                 self.schema_root()?,
