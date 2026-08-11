@@ -176,11 +176,15 @@ cargo test --manifest-path src-tauri/Cargo.toml
 | 릴리스 | 범위 |
 | --- | --- |
 | **v0.1 (완료)** | 온보딩/환경 구성, `CreateSchema`·`AlleleCall`·`ExtractCgMLST`, 실시간 로그·진행 표시·취소, 스키마 내보내기, 따라해보기 가이드 |
-| v0.2 | `PrepExternalSchema`(외부 스키마 들여오기), 스키마 불러오기, `RemoveGenes`·`JoinProfiles`, 리포트 내장 뷰어 |
-| v0.3 | `SchemaEvaluator`·`AlleleCallEvaluator`, `DownloadSchema`, `UniprotFinder` 주석 |
+| v0.2 | `PrepExternalSchema`(외부 스키마 들여오기), 스키마 불러오기, `RemoveGenes`·`JoinProfiles`, `SchemaEvaluator`·`AlleleCallEvaluator` |
+| v0.3 | `DownloadSchema`, `UniprotFinder` 주석 |
 
 `ExtractCgMLST` 는 v0.2 예정이었으나 앞당겼다. 그것이 없으면 AlleleCall 의
 `--gl` 칸을 채울 방법이 앱 안에 없어 워크플로가 닫히지 않는다.
+
+평가 리포트 두 개는 v0.3 예정이었으나 v0.2 로 당겼다. 다만 **내장 뷰어는 만들지
+않는다** — 리포트는 확대·검색·인쇄가 되는 기본 브라우저에서 여는 편이 낫다.
+[작업 상세] 의 [리포트 열기] 가 회수된 HTML 을 브라우저로 넘긴다.
 
 **범위 제외:** macOS/Linux 지원, Docker 실행, 클러스터/HPC 연동, Chewie-NS 쓰기 계열 기능.
 

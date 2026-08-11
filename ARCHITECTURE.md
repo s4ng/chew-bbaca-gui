@@ -153,9 +153,15 @@ AlleleCall이 신규 allele을 스키마 디렉터리에 계속 추가하므로,
 
 ### 4.5 Report Viewer
 
-SchemaEvaluator / AlleleCallEvaluator가 생성하는 인터랙티브 HTML을 앱 내 WebView로 표시한다.
+SchemaEvaluator / AlleleCallEvaluator가 생성하는 인터랙티브 HTML을 표시한다.
 환경 구성에 실패한 사용자를 위한 **결과 뷰어 모드**(외부 PC에서 생성된 리포트·TSV 열람)로도
 동작한다(§7.7).
+
+> **2026-08-11 결정: 앱 내 WebView 로 띄우지 않고 기본 브라우저로 넘긴다.**
+> 내장하려면 CSP 를 열고 asset 프로토콜을 붙여야 하는데, 정작 리포트는 확대·검색·
+> 인쇄가 되는 브라우저에서 보는 편이 낫다. [작업 상세]의 [리포트 열기]가
+> 회수된 폴더에서 `*_report.html` 을 찾아 `opener` 로 연다(`commands::report_open`).
+> 결과 뷰어 모드는 이 결정과 무관하게 남아 있다.
 
 ---
 

@@ -30,6 +30,11 @@
 | **CreateSchema 완주** | `chewBBACA.py CreateSchema --cds` | 2초, **20 loci** 생성. `schema_seed/` 구조 확인 |
 | **AlleleCall 완주** | `chewBBACA.py AlleleCall --cds` | 2초, EXC 20 / INF 60. `results_alleles.tsv` 생성 |
 | 진행률 파싱 | `runner/progress.rs` | 위 두 로그로 **교정 완료**. 테스트가 실측 로그를 재생한다 |
+| **SchemaEvaluator 완주** | 앱에서 실행 (loci 3,127) | 2초. `schema_report.html` 회수 (2026-08-11) |
+| **AlleleCallEvaluator 완주** | 앱에서 실행 (균주 32 × loci 3,127) | 38초. `allelecall_report.html` 회수 (2026-08-11) |
+| 한글·괄호 결과 경로 | `…\리포트 테스트 (평가)\se` | 스테이징·회수 모두 통과 |
+| **RemoveGenes 완주** | 앱에서 실행 | loci 3,127 − 목록 1,270 = **1,857**. 목록 loci 잔존 0 (2026-08-11) |
+| **JoinProfiles 완주** | 앱에서 실행 | 3,127×32 + 1,270×32 `--common` → **1,270 loci × 64행** (2026-08-11) |
 
 > 완주는 **합성 CDS 입력**(게놈 4개 × 유전자 20개, `--cds` 로 Prodigal 우회)으로 했다.
 > 단계 이름과 순서를 얻는 데는 충분하지만, 단계별 **비중**은 실제 어셈블리로 다시 봐야 한다.
@@ -39,39 +44,18 @@
 > `/usr/bin/link`(coreutils)로 잡아 MSVC 링커를 가린다. 증상이
 > `could not compile <crate> (build script)` 로만 나와 코드 문제로 오해하기 쉽다.
 
-### 검증되지 **않은** 것 — 여기가 다음 세션의 본 게임
+### 검증되지 **않은** 것
 
-**인스톨러를 아직 한 번도 설치해 보지 않았다.** 설치·제거 양쪽에 미검증 지점이 있다.
+2026-08-09 판의 이 목록(인스톨러·`JobManager` 전체 경로·스테이징·스키마 등록·조정)은
+**8/10~8/11 에 전부 해소됐다.** 인스톨러로 설치한 앱에서 파이프라인을 완주시켰고,
+언인스톨 훅도 체크박스 양쪽으로 확인했다(④).
 
-- 설치 후 `resource_dir()\rootfs\chewie-rootfs-3.5.4.tar.gz` 를 실제로 찾아내는지
-  (`rootfs_origin()` 이 `bundled` 를 반환하는지). rootfs 가 인스톨러 안에 들어간 것은
-  크기로 확인했지만 런타임 경로 해석은 설치해 봐야 안다.
-- 제거 시 `nsis/hooks.nsh` 훅이 도는지 — **체크박스를 켠 경우** `wsl -l -v` 에서
-  `chewie-env` 가 사라지고 `%LOCALAPPDATA%\ChewieApp` 이 없어져야 한다.
-  **끈 경우** 둘 다 남아야 한다. 두 방향을 모두 확인한다.
-- 체크박스 문구가 교체된 한국어로 뜨는지 (기본 "애플리케이션 데이터 삭제하기" 가
-  아니어야 한다). 깨져 보이면 `nsis/*.nsh` 의 UTF-8 BOM 이 사라진 것이다.
+**여덟 모듈 모두 앱을 거쳐 완주했다** (2026-08-11). 남은 것은 셋뿐이다.
 
-> **2026-08-10 오후: 앱을 거쳐 CreateSchema → AlleleCall 을 완주했다.** 아래 문단은
-> 그 이전 상태를 적은 것이고, 지금은 대부분 해소됐다 — §1 의 검증 표를 먼저 본다.
-> 튜토리얼 데이터(*S. agalactiae* 완성 게놈 32개)로 CreateSchema 3,127 loci 생성 →
-> AlleleCall 1분 43초(EXC 41,555 / INF 14,702 / LNF 42,347, 신규 allele 14,702개 추가)
-> → 결과 TSV 회수까지 확인. **남은 미검증은 조정(reconciliation) 실경로 하나뿐이다.**
-
-**chewBBACA 는 돌려봤지만 앱을 거쳐서 돌린 적은 없다.** 2026-08-10 에 배포판을 등록하고
-WSL 안에서 직접 CreateSchema/AlleleCall 을 완주시켰다(위 표). 덕분에 백엔드 쪽 불확실성은
-대부분 사라졌지만, **그 사이를 잇는 앱 코드는 여전히 한 번도 실행되지 않았다.**
-
-아직 미검증인 것.
-
-- **`JobManager` 전체 경로** — 폼 제출 → SQLite 기록 → 러너 호출 → 로그 파일 기록 →
-  Tauri 이벤트 → UI 갱신. 이 사슬은 아직 한 번도 이어진 적이 없다.
-- **스테이징과 회수** (`stage_input`, `collect_output`) — `/mnt/c` ↔ ext4 복사가 실제
-  Windows 경로로 동작하는지. 위 완주는 입력·출력이 모두 WSL 안에 있었다.
-- **스키마 등록** (`inspect_schema` → `db.insert_schema` → 스키마 화면). `schema_seed/`
-  구조와 loci 20개는 확인했으나 앱이 그것을 읽어 등록하는 경로는 미실행.
+- **[리포트 열기] 버튼을 거치는 경로** — 리포트 자체는 사용자가 확인했지만, 그것이
+  버튼을 통한 것인지 폴더에서 직접 연 것인지는 구분되지 않았다. 아래 ⑤-2 각주.
 - `/mnt/c` vs ext4 실행 시간 차이 (§5.2 의 전제 자체) — 아래 ②
-- 조정(reconciliation) 실경로 — 아래 ④
+- **다른 PC 에서의 설치** — 이 PC 에서만 설치·제거를 확인했다. 아래 ⑤ 참조.
 
 ---
 
@@ -210,67 +194,102 @@ loci 수까지 정상 표시. `stage_input` → `-g` 연결도 이로써 검증�
 
 이로써 **네 모듈 모두 UI 경로로 검증 완료**다.
 
-### ⑤-1 다음 세션의 첫 작업 — 평가 리포트 두 개
+### ⑤-1 평가 리포트 두 개 — ✅ 2026-08-11 완료
 
-`SchemaEvaluator` · `AlleleCallEvaluator` 는 **백엔드만 준비돼 있고 UI 에 노출되지
-않는다.** 착수하면 바로 이어서 할 수 있도록 남은 것만 적는다.
+UI 노출·실행 검증·진행률 교정·[리포트 열기]까지 끝냈다. **앱을 거쳐 두 모듈 모두
+완주했고**(loci 3,127 / 균주 32) 리포트가 한글·공백·괄호가 든 결과 폴더로
+회수되는 것까지 확인했다. 실측으로 드러난 것들:
 
-**이미 되어 있는 것** (커밋됨, 컴파일·테스트 통과)
+- **리포트 파일명 확정** — `schema_report.html` / `allelecall_report.html`.
+  옆에 15MB 안팎의 `report_bundle.js` 가 함께 놓인다. `commands.rs` 의 테스트가
+  이 이름을 굳혀 둔다.
+- `--loci-reports` 는 loci 마다 MAFFT 를 돌린다. loci 3,127 기준 **3초 → 39초**,
+  회수 파일도 2개 → 3,130개가 된다. 폼에 그 사실을 적어두었다.
+- 두 모듈 다 산출물의 `temp/` 를 스스로 지운다. 회수 비용을 걱정할 필요가 없다.
+- 진행률 비중은 실측대로다. AlleleCallEvaluator 는 MSA(44%)와 NJ 트리(44%)가
+  거의 전부이고 앞의 여러 단계는 다 합쳐 2초다.
 
-- `Module` 에 두 variant, `cli_name`/`parse` 까지
-- `ModuleParams::SchemaEvaluator { schema_id, loci_reports }`
-  / `AlleleCallEvaluator { results_dir, schema_id }`
-- `cli.rs::build_argv` 의 인자 조립 (`--help` 로 확인한 실제 인자)
-  - SchemaEvaluator: `-g <스키마>/schema_seed -o <out> --cpu [--loci-reports]`
-  - AlleleCallEvaluator: `-i <결과폴더> -g <스키마>/schema_seed -o <out> --cpu`
-- `wsl.rs::run()` 의 스테이징 분기
-  - SchemaEvaluator 는 **스테이징하지 않는다** (스키마가 이미 ext4 안에 있다)
-  - AlleleCallEvaluator 는 결과 폴더를 `stage_input` 으로 복사한다
-- `jobs.rs::submit()` 게이트 (스키마 선택 여부, 결과 폴더에 results_alleles.tsv 존재)
-- `types.ts` 의 `Module` 유니온, `MODULE_LABEL`/`MODULE_INFO`/`MODULE_STEP`
-
-**남은 것**
-
-1. `types.ts` 의 `JobSpec` 유니온에 두 variant 추가 → `models.rs` 의 왕복 테스트에도
-   해당 JSON 을 넣는다 (이 테스트가 있어야 serde 계약이 지켜진다).
-2. `NewJobPage.tsx` 의 `FormModule` 에 두 개를 더하고 `<option>` 과 입력 칸을 만든다.
-   - SchemaEvaluator: 스키마 선택 + [loci 별 상세 리포트] 체크박스
-   - AlleleCallEvaluator: 결과 폴더 선택 + 스키마 선택
-3. **실행 검증** — 리포트 HTML 파일명을 확인한다. `SchemaEvaluator` 는
-   `schema_report.html`, `AlleleCallEvaluator` 는 `allelecall_report.html` 로 알려져
-   있으나 **실측하지 않았다.** 3.5.4 로 직접 돌려 확인할 것.
-4. `progress.rs` 의 단계표. 지금은 빈 표라 진행률이 멈춘 채로 있다(로그는 흐른다).
-   실측 로그로 채운다 — 추측으로 채우면 두 번 다 틀렸던 전례가 있다.
-
-### ⑤-2 리포트를 브라우저로 여는 경로
+### ⑤-2 리포트를 브라우저로 여는 경로 — ✅ 2026-08-11 완료
 
 **내장 뷰어는 만들지 않기로 했다.** 앱 웹뷰에 띄우려면 CSP 를 열고 asset 프로토콜을
 붙여야 하는데, 리포트는 확대·검색·인쇄가 되는 브라우저에서 보는 편이 낫다.
 
-- [작업 상세] 에 평가 리포트 작업이면 **[리포트 열기]** 버튼을 띄운다.
-- 여는 방식은 [따라해보기] 와 동일하다 — `commands.rs::guide_open` 참조.
-  **프런트의 `openPath` 는 스코프가 비어 있어 열리지 않는다.** Rust 에서
-  `app.opener().open_path(...)` 로 연다.
-- 회수된 결과 폴더 안에서 `*_report.html` 을 찾아 그 경로를 연다.
+`commands.rs::report_open` 이 회수된 폴더에서 리포트를 찾아 `opener` 로 연다.
+[작업 상세] 는 **완료된 평가 작업**에만 [리포트 열기] 를 띄운다(회수 전에는 열 것이 없다).
+여는 방식은 [따라해보기] 와 같다 — 프런트의 `openPath` 는 스코프가 비어 있어
+열리지 않으므로 Rust 에서 `app.opener().open_path(...)` 로 연다.
+
+> **버튼 자체를 눌러본 것은 아직 아니다.** 파일을 찾는 부분(`find_report`)은
+> 단위 테스트가 지키고, 여는 부분은 [따라해보기] 로 이미 검증된 같은 경로다.
+
+### ⑤-3 RemoveGenes · JoinProfiles 실행 검증 — ✅ 2026-08-11 완료
+
+앱에서 실행해 **의심하던 두 지점이 모두 정상**임을 확인했다.
+
+- **`-o` 가 폴더가 아니라 파일인 경로가 동작한다.** 두 모듈은 산출물이 파일 하나라
+  `{work}/output/` 안에 만든 뒤 폴더째 회수하는데, 실제로 그 자리에 떨어져
+  결과 폴더로 회수됐다 (`results_alleles_filtered.tsv`, `joined_profiles.tsv`).
+- **`stage_files()` 의 이름 바꾸기가 결과로 새지 않는다.** 입력이 하나같이
+  `results_alleles.tsv` 라 `0.tsv`/`1.tsv` 로 바꿔 복사하는데, 합쳐진 표의 열 이름과
+  균주 이름 어디에도 그 이름이 나타나지 않았다.
+
+숫자로도 맞다 — RemoveGenes 는 `3,127 − 1,270 = 1,857` 이고 제거 대상 loci 의
+잔존이 0이다. JoinProfiles 는 `--common` 으로 교집합 1,270 loci, 행은 32+32=64 다.
+
+> **JoinProfiles 를 시험할 때는 균주가 겹치지 않는 결과 두 개를 써야 한다.** 위 검증은
+> 같은 균주 32개짜리 결과 둘을 합친 것이라 **모든 균주가 두 번씩** 들어갔다. 배관을
+> 확인하는 데는 충분하지만 그 표 자체는 분석에 쓸 수 없다. 제대로 하려면 어셈블리를
+> 나눠 AlleleCall 을 두 번 돌린 결과를 합친다.
 
 ### ⑤ 그다음 (v0.2 범위)
 
-- ~~`ExtractCgMLST` 추가~~ ✅ **2026-08-10 구현 완료.** 다만 **앱에서 아직 실행해보지 않았다.**
+- ~~`ExtractCgMLST` 추가~~ ✅ **2026-08-10 구현 완료** (UI 경로 검증은 §5-0 참조).
   이 모듈이 기존 두 개와 다른 점 세 가지가 다음 모듈 추가의 참고가 된다.
   - 입력이 폴더가 아니라 **파일 하나**다 → `Module::takes_input_dir()` 로 갈라
     `stage_file()` 이 그 파일만 ext4 로 복사한다. `submit()` 의 `input_dir` 검증도 조건부다.
   - **`--cpu` 인자가 없다.** `build_argv` 가 무조건 붙이던 것을 모듈별로 바꿨다
     (붙이면 argparse 가 즉시 실패한다).
   - 진행률 막대가 없어 단계 표시가 거칠다. 실행이 짧아 문제되지 않는다.
-- 다음 모듈을 넣기 전에 `JobSpec` 정리를 검토한다. 지금은 모듈별 필드가 한 구조체에
-  쌓이는 중이다 (`profiles_file`, `thresholds` 가 이번에 추가됐다).
-- 리포트 내장 뷰어 (SchemaEvaluator HTML) 및 결과 뷰어 모드 (§4.5, §7.7)
-- 배포: 인스톨러를 **다른 PC 에서** 설치해 첫 실행까지 확인. 지인 배포는 zip 전달이므로
-  SmartScreen 경고 안내(§8.4)를 README 에 넣어야 한다.
+- ~~다음 모듈을 넣기 전에 `JobSpec` 정리~~ ✅ 2026-08-10 에 `ModuleParams` 열거형으로
+  갈랐다. 모듈이 넷 더 붙는 동안 이 구조가 버텼다 — 새 모듈은 variant 하나만 더한다.
+- ~~리포트 내장 뷰어~~ ❌ **만들지 않기로 했다** (§5-2). 결과 뷰어 모드(§7.7)는 남아 있다.
+- **배포 — 이제 여기가 다음 세션의 첫 작업이다.** v0.2 기능 범위는 닫혔다
+  (여덟 모듈 전부 앱에서 완주). 남은 것은 내보내는 일이다.
+  - 버전을 올린다. **세 곳이 각자 적혀 있다** — `package.json`,
+    `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`. 어긋나면 인스톨러 파일명과
+    앱 정보가 따로 논다.
+  - `npm run tauri:build` → `dist-rootfs/` 의 tar.gz 가 동봉된다. rootfs 파일명은
+    **네 곳**에 흩어져 있다 (CLAUDE.md 참조).
+  - 인스톨러를 **다른 PC 에서** 설치해 첫 실행까지 확인. 이 PC 는 이미 `chewie-env` 가
+    있어 온보딩 ③(rootfs 등록)을 지나가므로, 그 경로는 다른 기기에서만 검증된다.
+  - 지인 배포는 zip 전달이므로 SmartScreen 경고 안내(§8.4)를 README 에 넣어야 한다.
 
 ---
 
 ## 4. 손대기 전에 알아야 할 함정
+
+- **모듈에 따라 `-o` 가 이미 있으면 거부한다.** (2026-08-11 에 실제로 물림)
+  `Output directory already exists.` 한 줄과 exit 1 이 전부다 — 로그만 보면 왜
+  아무 일도 안 일어났는지 알기 어렵다. 검사를 가진 모듈은 넷이다:
+  `CreateSchema` · `PrepExternalSchema`(=adapt_schema) · **`SchemaEvaluator`** ·
+  **`AlleleCallEvaluator`**. 앞의 둘은 `-o` 가 아직 없는 스키마 경로라 문제가 없지만,
+  평가 두 모듈은 `-o` 가 `{work}/output` 이고 **스테이징이 그 폴더를 미리 만든다.**
+  그래서 `wsl.rs::drop_empty_output()` 이 실행 직전에 빈 output 을 도로 지운다
+  (`rmdir` 이라 비어 있을 때만 지워진다). 새 모듈을 넣을 때 `-o` 를 `{work}/output`
+  으로 겨눈다면 **그 모듈에 이 검사가 있는지부터 확인한다** —
+  `grep -n OUTPUT_DIRECTORY_EXISTS chewBBACA.py` 한 줄이면 된다.
+
+- **AlleleCallEvaluator 는 `cds_coordinates.tsv` 를 요구한다.** 그 파일은 AlleleCall 이
+  Prodigal 로 CDS 를 예측했을 때만 나온다 — `--cds` 로 돌린 결과 폴더에는 **없다.**
+  없으면 모듈이 파이썬 traceback 으로 죽으므로 `jobs.rs::submit()` 에서 미리 막는다.
+  (`allele_call.py` 가 `cds_input` 일 때 `cds_coordinates = None` 으로 두고,
+  `evaluate_calls.py` 는 그 파일을 조건 없이 연다.)
+
+- **chewBBACA 는 진행 중인 작업을 줄바꿈 없이 찍고 끝난 뒤에 `done.` 을 붙인다.**
+  우리 `pump()` 는 `\n`/`\r` 로만 자르므로 **그런 줄은 이미 끝난 뒤에야 도착한다.**
+  AlleleCallEvaluator 의 NJ 트리(전체의 44%, 15초)가 그렇다. 진행률 단계를 그 줄에
+  걸면 막대가 죽은 것처럼 보인다 — **바로 앞 줄**을 진입 신호로 삼아야 한다
+  (`progress.rs` 의 `results are available in` 참조).
 
 - **serde 의 `rename_all` 은 열거형에서 *variant 이름*을 바꾼다.** 필드를 바꾸는 것은
   `rename_all_fields` 다. `ModuleParams` 에 `rename_all = "camelCase"` 만 붙였다가
