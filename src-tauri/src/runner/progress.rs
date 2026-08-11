@@ -125,12 +125,19 @@ const EXTRACT_CGMLST: &[Stage] = &[
     ("html file with cgmlst", 0.90, 0.09, "리포트 생성 중"),
 ];
 
-/// PrepExternalSchema. **실측하지 않은 유일한 표다** — chewie-env 없이 구현했다.
-/// 문구가 안 맞으면 진행률만 멈추고 작업은 정상 진행된다(설계상 그렇게 되어 있다).
-/// 실제 로그를 얻으면 다른 표들처럼 교정한다.
+/// PrepExternalSchema. 2026-08-11 실측 로그 기준.
+///
+/// 단계가 사실상 둘뿐이고 변환 구간에만 막대가 붙는다. 처음 만들 때 추측했던
+/// `adapting schema` 는 로그에 아예 없는 문구였다 — `Adapting 12 loci...` 다.
 const PREP_EXTERNAL: &[Stage] = &[
-    ("adapting schema", 0.05, 0.85, "스키마 변환 중"),
-    ("adapted schema", 0.90, 0.09, "마무리 중"),
+    (
+        "determining the total number of alleles",
+        0.02,
+        0.06,
+        "스키마 훑는 중",
+    ),
+    ("adapting", 0.08, 0.84, "loci 변환 중"),
+    ("number of invalid loci", 0.92, 0.06, "마무리 중"),
 ];
 
 fn percent_re() -> &'static Regex {
@@ -308,6 +315,30 @@ mod tests {
             prev = *v;
         }
         assert!(prev >= 0.96, "마지막 진행률이 {prev} 에 그쳤다");
+    }
+
+    /// 2026-08-11 실측. 이 모듈은 막대가 변환 구간에만 붙는다.
+    const PREP_EXTERNAL_LOG: &[&str] = &[
+        "Number of loci to adapt: 12",
+        "Determining the total number of alleles and allele mean length per gene...",
+        "Adapting 12 loci...",
+        " [                    ] 0%",
+        " [========            ] 41%",
+        " [====================] 100%",
+        "Number of invalid loci: 0",
+        "Successfully adapted 12/12 loci present in the input schema.",
+    ];
+
+    #[test]
+    fn prep_external_schema_log_advances_monotonically() {
+        let seen = run(Module::PrepExternalSchema, PREP_EXTERNAL_LOG);
+        assert!(!seen.is_empty(), "실측 로그에서 아무것도 인식하지 못했다");
+        let mut prev = 0.0;
+        for (v, _) in &seen {
+            assert!(*v > prev, "되감김: {prev} → {v}");
+            prev = *v;
+        }
+        assert!(prev >= 0.92, "마지막 진행률이 {prev} 에 그쳤다");
     }
 
     #[test]

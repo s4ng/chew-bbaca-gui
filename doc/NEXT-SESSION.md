@@ -191,23 +191,22 @@ WSL 안에서 직접 CreateSchema/AlleleCall 을 완주시켰다(위 표). 덕�
 > 산출물이 `~/schemas/{id}` 로 가므로 **진짜 고아가 된 CreateSchema 는 성공했어도
 > 실패로 확정된다.** ④ 를 검증할 때 이것부터 고쳐야 한다.
 
-### ⑤-0 실행해봐야 하는 것 — **PrepExternalSchema**
+### ⑤-0 PrepExternalSchema 검증 — ✅ 2026-08-11 완료
 
-2026-08-10 에 구현했지만 **한 번도 실행하지 못했다.** 그 시점에 `chewie-env` 를
-제거한 상태여서 `--help` 조차 못 봤고, 인자와 출력 구조를 문서와 저장소 소스로만
-확인했다. 확인 근거와 함께 남긴다.
+문서·소스만 보고 구현했던 가정을 실제로 돌려 확인했다. 입력은 내보내둔 스키마에서
+loci 12개를 뽑아 만든 폴더다.
 
-- `--cpu` 있음 (readthedocs 옵션 목록)
-- **출력 구조가 CreateSchema 와 다르다.** `-o` 아래에 `schema_seed/` 를 만들지 않고
-  loci FASTA·`short/`·`.schema_config` 를 **바로** 푼다
-  (`tests/data/prepexternalschema_data/.../expected_results` 로 확인).
-  그래서 `-o` 를 `{스키마}/schema_seed` 로 겨눠 앱의 나머지와 맞물리게 했다.
-  **이 가정이 틀리면 loci 수가 0 으로 잡히고 AlleleCall 이 스키마를 못 찾는다.**
-- `progress.rs` 의 `PREP_EXTERNAL` 단계표는 **유일하게 실측하지 않은 표다.**
-  문구가 안 맞으면 진행률만 멈추고 작업은 정상 진행된다.
+- **출력 구조 가정이 맞았다.** 이 모듈은 `-o` 아래에 `schema_seed/` 를 만들지 않고
+  loci FASTA 를 **바로** 푼다. 그래서 `-o` 를 `{스키마}/schema_seed` 로 겨눴고,
+  앱의 loci 계수(`ls {p}/schema_seed/*.fasta`)가 그대로 12를 돌려준다.
+- 부산물(`schema_seed_invalid_loci.txt` 등)은 `-o` 의 **형제**로 떨어진다.
+  스키마 폴더 최상위에 놓이므로 CreateSchema 의 `cds_coordinates.tsv` 와 같은 취급이다.
+- **들여온 스키마로 AlleleCall 이 정상 완주했다** (EXC 21 / 신규 0).
+- 진행률 표를 실측 로그로 교정했다. 추측했던 `adapting schema` 는 로그에 없는
+  문구였고 실제로는 `Adapting 12 loci...` 다.
 
-검증 방법: 공인 스키마를 하나 받아 들여온 뒤 [스키마] 화면에 loci 수가 제대로
-뜨는지, 그 스키마로 AlleleCall 이 도는지 본다.
+남은 것: **앱 UI 를 거쳐서는 아직 안 돌려봤다.** CLI 로 같은 인자를 검증한 것이라
+`stage_input` → `-g` 연결까지는 확인되지 않았다.
 
 ### ⑤ 그다음 (v0.2 범위)
 
