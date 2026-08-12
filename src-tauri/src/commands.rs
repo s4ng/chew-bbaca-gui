@@ -526,7 +526,7 @@ pub fn guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> 
 #[tauri::command]
 pub fn mcp_guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
     const HTML: &str = include_str!("../guide/mcp.html");
-    const SHOTS: [(&str, &[u8]); 5] = [
+    const SHOTS: [(&str, &[u8]); 4] = [
         (
             "mcp-01-app-settings.png",
             include_bytes!("../guide/mcp-01-app-settings.png"),
@@ -534,10 +534,6 @@ pub fn mcp_guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<Stri
         (
             "mcp-02-chatgpt-settings.png",
             include_bytes!("../guide/mcp-02-chatgpt-settings.png"),
-        ),
-        (
-            "mcp-03-connect-form.png",
-            include_bytes!("../guide/mcp-03-connect-form.png"),
         ),
         (
             "mcp-04-server-list.png",
