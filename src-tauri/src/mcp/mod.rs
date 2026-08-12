@@ -40,9 +40,21 @@ pub struct McpStatus {
     pub allow_run: bool,
     /// 실제로 열린 포트. 설정값과 다를 수 있다 (충돌 시 다음 포트를 쓴다).
     pub port: Option<u16>,
+    /// 실제로 열려 있는 주소. 꺼져 있으면 `None`.
     pub url: Option<String>,
     pub token: String,
-    /// 사용자가 클라이언트 설정 파일에 붙여넣을 조각.
+
+    // ---- 붙여넣기용 ----
+    //
+    // **클라이언트 등록 화면은 URL·헤더 키·헤더 값을 따로 받는 폼이다.** 설정 파일
+    // 문법(TOML)을 통째로 주면 사용자가 거기서 값을 눈으로 뜯어내야 한다. 그래서
+    // 칸 단위로 그대로 복사할 수 있는 값을 따로 내려보낸다.
+    //
+    // 서버가 꺼져 있어도 값은 채운다 — 켜기 전에 미리 등록해 두는 경우가 있다.
+    pub connect_url: String,
+    pub header_name: String,
+    pub header_value: String,
+    /// 설정 파일을 쓰는 클라이언트(Codex CLI)용 TOML 조각. 부차적인 수단이다.
     pub client_config: String,
 }
 
@@ -120,12 +132,17 @@ impl McpServer {
         // UI 는 그때 [서버 켜기] 를 안내한다.
         let token = settings.mcp.token.clone();
         let url = port.map(|p| format!("http://127.0.0.1:{p}/mcp"));
+        // 실제로 열린 포트가 진실이다. 꺼져 있을 때만 설정값으로 대신한다.
+        let effective = port.unwrap_or(settings.mcp.port);
 
         McpStatus {
             running: port.is_some(),
             enabled: settings.mcp.enabled,
             allow_run: settings.mcp.allow_run,
-            client_config: client_config(port.unwrap_or(settings.mcp.port), &token),
+            connect_url: endpoint_url(effective),
+            header_name: HEADER_NAME.to_string(),
+            header_value: header_value(&token),
+            client_config: client_config(effective, &token),
             port,
             url,
             token,
@@ -169,18 +186,33 @@ fn write_endpoint_file(state: &AppState, port: u16, token: &str) {
     );
 }
 
-/// 사용자가 MCP 클라이언트 설정 파일에 붙여넣을 조각.
+/// 인증 헤더의 이름. 클라이언트 등록 화면의 [헤더] 키 칸에 그대로 들어간다.
+pub const HEADER_NAME: &str = "Authorization";
+
+/// 토큰이 아직 없을 때 칸에 보여줄 문구. 빈 칸을 주면 사용자가 복사해 놓고
+/// 왜 안 되는지 몰라 헤맨다.
+const NO_TOKEN: &str = "<앱을 켜면 발급됩니다>";
+
+pub fn endpoint_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/mcp")
+}
+
+/// [헤더] 값 칸에 넣을 문자열. **`Bearer` 와 토큰 사이의 공백 하나가 규격이다** —
+/// 사용자가 손으로 조립하면 여기서 자주 틀린다.
+pub fn header_value(token: &str) -> String {
+    let token = if token.is_empty() { NO_TOKEN } else { token };
+    format!("Bearer {token}")
+}
+
+/// 설정 파일을 쓰는 클라이언트(Codex CLI 의 `~/.codex/config.toml`)용 조각.
 ///
-/// ChatGPT Desktop / Codex 기준이다 (`~/.codex/config.toml`). 다른 클라이언트도
-/// URL 과 Authorization 헤더 두 가지만 있으면 되므로 이 값을 그대로 옮기면 된다.
+/// ChatGPT 데스크톱 앱처럼 폼으로 받는 클라이언트에는 쓸모가 없다 — 그쪽은
+/// `connect_url` / `header_name` / `header_value` 를 칸마다 넣는다.
 pub fn client_config(port: u16, token: &str) -> String {
-    let token = if token.is_empty() {
-        "<앱을 켜면 발급됩니다>"
-    } else {
-        token
-    };
+    let token = if token.is_empty() { NO_TOKEN } else { token };
     format!(
-        "[mcp_servers.chewie]\nurl = \"http://127.0.0.1:{port}/mcp\"\nhttp_headers = {{ Authorization = \"Bearer {token}\" }}\n"
+        "[mcp_servers.chewie]\nurl = \"{}\"\nhttp_headers = {{ {HEADER_NAME} = \"Bearer {token}\" }}\n",
+        endpoint_url(port)
     )
 }
 
@@ -200,7 +232,25 @@ mod tests {
     #[test]
     fn client_config_is_still_readable_before_the_token_exists() {
         let s = client_config(8787, "");
-        assert!(s.contains("<앱을 켜면 발급됩니다>"));
+        assert!(s.contains(NO_TOKEN));
+    }
+
+    /// 등록 폼에 그대로 넣을 값들. 여기서 만들어 주지 않으면 사용자가 손으로
+    /// 조립하다 `Bearer` 뒤 공백 같은 데서 틀린다.
+    #[test]
+    fn per_field_values_are_ready_to_paste() {
+        assert_eq!(endpoint_url(8787), "http://127.0.0.1:8787/mcp");
+        assert_eq!(header_value("deadbeef"), "Bearer deadbeef");
+        assert_eq!(HEADER_NAME, "Authorization");
+    }
+
+    #[test]
+    fn the_toml_snippet_agrees_with_the_per_field_values() {
+        // 두 수단이 다른 값을 안내하면 사용자는 어느 쪽이 맞는지 알 수 없다.
+        let toml = client_config(9001, "abc123");
+        assert!(toml.contains(&endpoint_url(9001)));
+        assert!(toml.contains(&header_value("abc123")));
+        assert!(toml.contains(HEADER_NAME));
     }
 
     #[test]

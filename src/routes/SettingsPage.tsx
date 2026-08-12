@@ -98,16 +98,24 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     }
   };
 
-  const copyConfig = async () => {
-    if (!mcp) return;
+  /**
+   * 칸 하나를 클립보드로. 등록 화면이 URL·헤더 키·헤더 값을 따로 받으므로
+   * 복사도 칸 단위여야 한다 — 설정 파일 문법을 통째로 주면 사용자가 값을 눈으로
+   * 뜯어내야 한다.
+   */
+  const copyValue = async (label: string, value: string, elementId: string) => {
+    setError(null);
     try {
-      await navigator.clipboard.writeText(mcp.clientConfig);
-      setMessage("클라이언트 설정을 복사했습니다.");
+      await navigator.clipboard.writeText(value);
+      setMessage(`${label} 복사했습니다.`);
     } catch {
       // 웹뷰가 보안 컨텍스트가 아니면 클립보드 API 가 없다. 그때는 직접 고르게 한다.
-      const el = document.getElementById("mcp-config") as HTMLTextAreaElement | null;
+      const el = document.getElementById(elementId) as
+        | HTMLInputElement
+        | HTMLTextAreaElement
+        | null;
       el?.select();
-      setMessage("복사하지 못했습니다. 아래 칸이 선택되었으니 Ctrl+C 를 누르세요.");
+      setMessage("복사하지 못했습니다. 칸이 선택되었으니 Ctrl+C 를 누르세요.");
     }
   };
 
@@ -349,27 +357,67 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
           </div>
         </div>
 
-        <div className="field">
-          <label htmlFor="mcp-config">클라이언트 설정 (ChatGPT 데스크톱 · Codex 의 config.toml)</label>
+        <h3 style={{ margin: "18px 0 4px", fontSize: 14 }}>클라이언트에 넣을 값</h3>
+        <div className="hint" style={{ marginBottom: 8 }}>
+          ChatGPT 데스크톱 앱의 [맞춤형 MCP에 연결] 화면은 칸이 따로 있습니다. 아래 세 값을
+          해당 칸에 하나씩 붙여 넣으세요. 유형은 <strong>스트리밍 가능한 HTTP</strong> 입니다.
+        </div>
+
+        {[
+          { id: "mcp-url", label: "URL", value: mcp?.connectUrl ?? "" },
+          { id: "mcp-header-name", label: "헤더 키", value: mcp?.headerName ?? "" },
+          { id: "mcp-header-value", label: "헤더 값", value: mcp?.headerValue ?? "" },
+        ].map((row) => (
+          <div className="field" key={row.id}>
+            <label htmlFor={row.id}>{row.label}</label>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                id={row.id}
+                type="text"
+                readOnly
+                className="mono"
+                style={{ flex: 1 }}
+                value={row.value}
+                onFocus={(e) => e.currentTarget.select()}
+              />
+              <button onClick={() => void copyValue(row.label, row.value, row.id)} disabled={!mcp}>
+                복사
+              </button>
+            </div>
+          </div>
+        ))}
+
+        <div className="hint" style={{ marginBottom: 10 }}>
+          [헤더 값] 에는 토큰이 들어 있습니다. 다른 사람에게 그대로 보내지 마세요.
+          ChatGPT 폼의 <span className="mono">기본 token 환경 변수</span> 칸은 비워 둡니다 —
+          거기는 토큰이 아니라 환경 변수의 <em>이름</em>을 받는 자리입니다.
+        </div>
+
+        <details style={{ marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", fontSize: 14 }}>
+            설정 파일을 쓰는 클라이언트라면 (Codex CLI 등)
+          </summary>
           <textarea
             id="mcp-config"
             readOnly
             rows={4}
             className="mono"
-            style={{ width: "100%", resize: "vertical" }}
+            style={{ width: "100%", resize: "vertical", marginTop: 8 }}
             value={mcp?.clientConfig ?? ""}
             onFocus={(e) => e.currentTarget.select()}
           />
+          <button
+            onClick={() => void copyValue("설정", mcp?.clientConfig ?? "", "mcp-config")}
+            disabled={!mcp}
+          >
+            복사
+          </button>
           <div className="hint">
-            이 조각을 <span className="mono">~/.codex/config.toml</span> 에 붙여 넣습니다. 토큰이
-            들어 있으니 다른 사람에게 그대로 보내지 마세요.
+            <span className="mono">~/.codex/config.toml</span> 에 붙여 넣습니다.
           </div>
-        </div>
+        </details>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <button onClick={() => void copyConfig()} disabled={!mcp || busy}>
-            설정 복사
-          </button>
           <button onClick={() => void openMcpGuide()} disabled={busy}>
             연결 방법 보기
           </button>

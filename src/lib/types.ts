@@ -185,7 +185,13 @@ export interface McpStatus {
   port: number | null;
   url: string | null;
   token: string;
-  /** 사용자가 클라이언트 설정 파일에 붙여넣을 조각 */
+  /** 등록 폼의 URL 칸에 그대로 넣는 값. 서버가 꺼져 있어도 채워진다. */
+  connectUrl: string;
+  /** 헤더 키 칸 — 언제나 `Authorization` */
+  headerName: string;
+  /** 헤더 값 칸 — `Bearer <토큰>` */
+  headerValue: string;
+  /** 설정 파일을 쓰는 클라이언트(Codex CLI)용 TOML 조각 */
   clientConfig: string;
 }
 
