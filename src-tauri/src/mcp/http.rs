@@ -34,9 +34,42 @@ pub fn serve(app: AppHandle, server: Arc<Server>) {
     }
 }
 
+/// 접속 기록 파일의 상한. 넘으면 지우고 새로 쓴다 — 진단용이라 최근 것만 있으면 된다.
+const LOG_MAX_BYTES: u64 = 256 * 1024;
+
+/// 요청 한 줄을 `%LOCALAPPDATA%\ChewieApp\mcp.log` 에 남긴다.
+///
+/// **연결이 안 될 때 클라이언트가 접속조차 못 한 것인지, 와서 거절당한 것인지를
+/// 가릴 방법이 이것밖에 없다.** 실패 증상이 양쪽 다 "도구가 안 보인다" 로 같다.
+fn log_request(app: &AppHandle, line: &str) {
+    use std::io::Write;
+
+    let path = app.state::<AppState>().paths.root.join("mcp.log");
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_MAX_BYTES) {
+        let _ = std::fs::remove_file(&path);
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(f, "{} {}", crate::util::now_iso(), line);
+    }
+}
+
 fn handle(app: &AppHandle, mut request: Request) {
     let method = request.method().as_str().to_ascii_uppercase();
     let path = request.url().split('?').next().unwrap_or("/").to_string();
+
+    // 헤더는 거절 여부와 무관하게 먼저 찍는다. 토큰 값 자체는 남기지 않는다.
+    let accept = find_header(&request, "accept").unwrap_or_else(|| "-".into());
+    let origin = find_header(&request, "origin").unwrap_or_else(|| "-".into());
+    let has_auth = find_header(&request, "authorization").is_some();
+    let agent = find_header(&request, "user-agent").unwrap_or_else(|| "-".into());
+    log_request(
+        app,
+        &format!("{method} {path} auth={has_auth} accept=\"{accept}\" origin={origin} ua=\"{agent}\""),
+    );
 
     // CORS 프리플라이트. 우리는 브라우저를 대상으로 하지 않지만, 거절하더라도
     // 조용히 끝나는 편이 낫다.
@@ -46,16 +79,19 @@ fn handle(app: &AppHandle, mut request: Request) {
     }
 
     if path != "/mcp" {
-        // 사용자가 브라우저로 포트를 확인해 보는 경우가 있다. 토큰 없이도
-        // "살아 있다" 는 것만 알려준다.
+        // 사용자가 브라우저로 포트를 확인해 보는 경우가 있다(가이드가 그렇게 안내한다).
+        // 토큰 없이도 "살아 있다" 는 것만 알려주고, 루트는 200 으로 답해 브라우저가
+        // 자기 오류 페이지를 대신 그리지 않게 한다.
         let body = "chewBBACA Desktop MCP server\nendpoint: POST /mcp\n";
-        let _ = request.respond(Response::from_string(body).with_status_code(404));
+        let status = if path == "/" { 200 } else { 404 };
+        let _ = request.respond(Response::from_string(body).with_status_code(status));
         return;
     }
 
     match method.as_str() {
         // 서버→클라이언트 스트림을 열지 않는다. 명세가 허용하는 응답이다.
         "GET" => {
+            log_request(app, "  → 405 (SSE 스트림은 열지 않는다)");
             let allow = header(&b"Allow"[..], &b"POST"[..]);
             let _ = request.respond(Response::empty(405).with_header(allow));
             return;
@@ -83,6 +119,7 @@ fn handle(app: &AppHandle, mut request: Request) {
             || origin.starts_with("https://127.0.0.1")
             || origin.starts_with("https://localhost");
         if !ok {
+            log_request(app, "  → 403 (허용되지 않은 Origin)");
             let _ = request.respond(Response::from_string("forbidden origin").with_status_code(403));
             return;
         }
@@ -102,6 +139,14 @@ fn handle(app: &AppHandle, mut request: Request) {
         .unwrap_or_default();
 
     if expected.is_empty() || presented.trim() != expected {
+        log_request(
+            app,
+            if presented.is_empty() {
+                "  → 401 (Authorization 헤더가 없음)"
+            } else {
+                "  → 401 (토큰 불일치)"
+            },
+        );
         let challenge = header(&b"WWW-Authenticate"[..], &b"Bearer"[..]);
         let _ = request.respond(
             Response::from_string("unauthorized")
@@ -134,6 +179,25 @@ fn handle(app: &AppHandle, mut request: Request) {
             return;
         }
     };
+
+    log_request(
+        app,
+        &format!(
+            "  → 요청 메서드: {}",
+            match &parsed {
+                Value::Array(items) => items
+                    .iter()
+                    .filter_map(|m| m.get("method").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                other => other
+                    .get("method")
+                    .and_then(Value::as_str)
+                    .unwrap_or("(없음)")
+                    .to_string(),
+            }
+        ),
+    );
 
     let reply = match parsed {
         // 배치는 2025-06-18 에서 빠졌지만, 보내는 클라이언트가 있으면 받아준다.

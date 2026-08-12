@@ -111,6 +111,7 @@ pub fn run() {
             commands::inspect_profiles_file,
             commands::inspect_loci_list,
             commands::guide_open,
+            commands::mcp_guide_open,
             commands::mcp_status,
             commands::mcp_configure,
             commands::mcp_regenerate_token,

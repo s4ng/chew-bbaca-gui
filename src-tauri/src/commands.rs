@@ -505,22 +505,6 @@ pub fn inspect_loci_list(path: String) -> Result<LociListInfo> {
 /// 못하기 때문이다. 우리가 방금 쓴 파일을 우리가 여는 것이므로 여기서 처리한다.
 #[tauri::command]
 pub fn guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
-    use tauri_plugin_opener::OpenerExt;
-
-    let path = write_guide(&state)?;
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| {
-            Error::Other(format!(
-                "가이드를 열지 못했습니다: {e}\n파일은 여기 있습니다: {}",
-                path.display()
-            ))
-        })?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// 가이드 파일 일습을 앱 폴더에 풀고 HTML 경로를 돌려준다.
-fn write_guide(state: &State<'_, AppState>) -> Result<PathBuf> {
     // (파일명, 내용) — 스크린샷은 HTML 이 상대 경로로 참조하므로 같은 폴더에 푼다.
     const HTML: &str = include_str!("../guide/guide.html");
     const SHOTS: [(&str, &[u8]); 3] = [
@@ -532,14 +516,77 @@ fn write_guide(state: &State<'_, AppState>) -> Result<PathBuf> {
         ("03-schemas.png", include_bytes!("../guide/03-schemas.png")),
     ];
 
+    open_guide(&app, state.inner(), "따라해보기.html", HTML, &SHOTS)
+}
+
+/// MCP 연결 안내. 설정 화면의 [MCP 서버] 칸에서 연다.
+///
+/// 따라해보기와 나누어 둔 이유는 읽는 시점이 다르기 때문이다 — 이쪽은 분석을 이미
+/// 할 줄 아는 사람이 "대화로 시키고 싶을 때" 한 번 보는 문서다.
+#[tauri::command]
+pub fn mcp_guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
+    const HTML: &str = include_str!("../guide/mcp.html");
+    const SHOTS: [(&str, &[u8]); 5] = [
+        (
+            "mcp-01-app-settings.png",
+            include_bytes!("../guide/mcp-01-app-settings.png"),
+        ),
+        (
+            "mcp-02-chatgpt-settings.png",
+            include_bytes!("../guide/mcp-02-chatgpt-settings.png"),
+        ),
+        (
+            "mcp-03-connect-form.png",
+            include_bytes!("../guide/mcp-03-connect-form.png"),
+        ),
+        (
+            "mcp-04-server-list.png",
+            include_bytes!("../guide/mcp-04-server-list.png"),
+        ),
+        (
+            "mcp-05-headers.png",
+            include_bytes!("../guide/mcp-05-headers.png"),
+        ),
+    ];
+
+    open_guide(&app, state.inner(), "MCP 연결하기.html", HTML, &SHOTS)
+}
+
+/// 가이드 일습을 앱 폴더에 풀고 기본 브라우저로 연다.
+///
+/// **문서와 스크린샷이 바이너리에 묻어서 나가므로 인터넷이 없어도** 열린다.
+/// Tauri 리소스로 동봉하지 않는 이유는 개발 실행에서는 리소스가 복사되지 않아
+/// 경로가 갈리기 때문이다. 매번 덮어써서 앱을 새로 깔면 문서도 함께 갱신된다.
+///
+/// **여는 것까지 Rust 가 한다.** 프런트에서 `openPath` 를 부르면 열리지 않는다 —
+/// `opener:allow-open-path` 는 "스코프 없이 명령만 허용"이라 어떤 경로도 통과하지
+/// 못하기 때문이다. 우리가 방금 쓴 파일을 우리가 여는 것이므로 여기서 처리한다.
+fn open_guide(
+    app: &AppHandle,
+    state: &AppState,
+    file_name: &str,
+    html: &str,
+    shots: &[(&str, &[u8])],
+) -> Result<String> {
+    use tauri_plugin_opener::OpenerExt;
+
     let dir = state.paths.root.join("guide");
     std::fs::create_dir_all(&dir)?;
-    for (name, bytes) in SHOTS {
+    for (name, bytes) in shots {
         std::fs::write(dir.join(name), bytes)?;
     }
-    let path = dir.join("따라해보기.html");
-    std::fs::write(&path, HTML)?;
-    Ok(path)
+    let path = dir.join(file_name);
+    std::fs::write(&path, html)?;
+
+    app.opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(|e| {
+            Error::Other(format!(
+                "가이드를 열지 못했습니다: {e}\n파일은 여기 있습니다: {}",
+                path.display()
+            ))
+        })?;
+    Ok(path.to_string_lossy().to_string())
 }
 
 /// AlleleCall 결과 표인지 확인한다 (ExtractCgMLST 입력 게이트).

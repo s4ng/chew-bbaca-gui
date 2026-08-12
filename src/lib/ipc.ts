@@ -81,6 +81,8 @@ export const guideOpen = () => invoke<string>("guide_open");
 // ---------------------------------------------------------------- MCP
 
 export const mcpStatus = () => invoke<McpStatus>("mcp_status");
+/** MCP 연결 안내 문서를 앱 폴더에 꺼내 기본 브라우저로 연다. */
+export const mcpGuideOpen = () => invoke<string>("mcp_guide_open");
 /**
  * MCP 설정을 바꾸고 서버를 다시 띄운다.
  *

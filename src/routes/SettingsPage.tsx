@@ -7,6 +7,7 @@ import {
   diskUsage,
   envUnregister,
   mcpConfigure,
+  mcpGuideOpen,
   mcpRegenerateToken,
   mcpStatus,
   settingsGet,
@@ -86,6 +87,14 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       // 새 토큰이 화면의 settings 에도 반영되어야 한다 (applyMcp 의 주석 참조).
       await refreshSettings();
       setBusy(false);
+    }
+  };
+
+  const openMcpGuide = async () => {
+    try {
+      await mcpGuideOpen();
+    } catch (e) {
+      setError(asAppError(e).message);
     }
   };
 
@@ -357,13 +366,20 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => void copyConfig()} disabled={!mcp || busy}>
             설정 복사
+          </button>
+          <button onClick={() => void openMcpGuide()} disabled={busy}>
+            연결 방법 보기
           </button>
           <button onClick={() => void regenerate()} disabled={!mcp || busy}>
             토큰 재발급
           </button>
+        </div>
+        <div className="hint" style={{ marginTop: 8 }}>
+          ChatGPT 데스크톱 앱에 등록하는 방법을 그림과 함께 설명합니다. 등록했는데 도구가 안
+          보인다면 대화창이 <strong>Work</strong> 모드인지부터 확인하세요.
         </div>
       </div>
 
