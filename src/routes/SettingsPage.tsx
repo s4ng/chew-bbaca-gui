@@ -6,24 +6,101 @@ import {
   diskCompact,
   diskUsage,
   envUnregister,
+  mcpConfigure,
+  mcpRegenerateToken,
+  mcpStatus,
   settingsGet,
   settingsSet,
 } from "../lib/ipc";
-import { asAppError, type BackendStatus, type DiskUsage, type Settings } from "../lib/types";
+import {
+  asAppError,
+  type BackendStatus,
+  type DiskUsage,
+  type McpStatus,
+  type Settings,
+} from "../lib/types";
 
 export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Promise<void> | void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [disk, setDisk] = useState<DiskUsage | null>(null);
+  const [mcp, setMcp] = useState<McpStatus | null>(null);
+  /** 입력 중인 포트. 서버는 포커스를 잃을 때만 다시 띄운다. */
+  const [port, setPort] = useState(8787);
+  /** 실제로 적용된 포트. 이것과 다를 때만 재기동한다. */
+  const [configuredPort, setConfiguredPort] = useState(8787);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    void settingsGet().then(setSettings).catch((e) => setError(asAppError(e).message));
+    void settingsGet()
+      .then((s) => {
+        setSettings(s);
+        setPort(s.mcp.port);
+        setConfiguredPort(s.mcp.port);
+      })
+      .catch((e) => setError(asAppError(e).message));
     void backendStatus().then(setBackend).catch(() => setBackend(null));
     void diskUsage().then(setDisk).catch(() => setDisk(null));
+    void mcpStatus().then(setMcp).catch(() => setMcp(null));
   }, []);
+
+  /// MCP 설정은 Rust 쪽에서 DB 에 직접 쓴다. **여기서 `settings` 를 다시 읽지 않으면**
+  /// 화면이 들고 있던 낡은 값이 남고, 사용자가 다른 항목을 저장하는 순간 그 낡은
+  /// mcp 값(포트·토큰)으로 덮여 쓴다 — 다음 실행에서 조용히 옛 포트로 돌아간다.
+  const refreshSettings = async () => {
+    const s = await settingsGet().catch(() => null);
+    if (s) setSettings(s);
+  };
+
+  const applyMcp = async (enabled: boolean, nextPort: number, allowRun: boolean) => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      setMcp(await mcpConfigure(enabled, nextPort, allowRun));
+      setConfiguredPort(nextPort);
+    } catch (e) {
+      // 포트 충돌 등으로 못 띄운 경우에도 설정값은 저장되어 있다.
+      setError(asAppError(e).message);
+      setMcp(await mcpStatus().catch(() => null));
+    } finally {
+      await refreshSettings();
+      setBusy(false);
+    }
+  };
+
+  const regenerate = async () => {
+    const ok = window.confirm(
+      "새 토큰을 발급합니다.\n지금까지 배포한 클라이언트 설정은 즉시 접속할 수 없게 되며, 새 설정을 다시 붙여넣어야 합니다.\n계속할까요?",
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      setMcp(await mcpRegenerateToken());
+      setMessage("새 토큰을 발급했습니다. 아래 설정을 클라이언트에 다시 붙여넣으세요.");
+    } catch (e) {
+      setError(asAppError(e).message);
+    } finally {
+      // 새 토큰이 화면의 settings 에도 반영되어야 한다 (applyMcp 의 주석 참조).
+      await refreshSettings();
+      setBusy(false);
+    }
+  };
+
+  const copyConfig = async () => {
+    if (!mcp) return;
+    try {
+      await navigator.clipboard.writeText(mcp.clientConfig);
+      setMessage("클라이언트 설정을 복사했습니다.");
+    } catch {
+      // 웹뷰가 보안 컨텍스트가 아니면 클립보드 API 가 없다. 그때는 직접 고르게 한다.
+      const el = document.getElementById("mcp-config") as HTMLTextAreaElement | null;
+      el?.select();
+      setMessage("복사하지 못했습니다. 아래 칸이 선택되었으니 Ctrl+C 를 누르세요.");
+    }
+  };
 
   const save = async (next: Settings) => {
     setSettings(next);
@@ -192,6 +269,101 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             onBlur={() => void save(settings)}
           />
           <div className="hint">64자리 16진수. 일치하지 않으면 받은 파일을 폐기합니다.</div>
+        </div>
+      </div>
+
+      <div className="card">
+        <h2>MCP 서버</h2>
+        <p style={{ color: "var(--text-dim)" }}>
+          ChatGPT 데스크톱 앱 같은 MCP 클라이언트가 이 앱의 기능을 읽고 실행할 수 있게 합니다.
+          서버는 <strong>이 앱이 켜져 있는 동안에만</strong> 동작하고, 같은 PC(127.0.0.1)에서만
+          접속할 수 있습니다.
+        </p>
+        <table className="kv">
+          <tbody>
+            <tr>
+              <td>상태</td>
+              <td>
+                {!mcp
+                  ? "확인 중..."
+                  : mcp.running
+                    ? `실행 중 · ${mcp.url}`
+                    : mcp.enabled
+                      ? "시작하지 못했습니다 (포트 충돌일 수 있습니다)"
+                      : "꺼져 있음"}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <label className="inline-check" style={{ marginTop: 10 }}>
+          <input
+            type="checkbox"
+            checked={mcp?.enabled ?? false}
+            disabled={!mcp || busy}
+            onChange={(e) => void applyMcp(e.target.checked, port, mcp?.allowRun ?? true)}
+          />
+          MCP 서버 사용
+        </label>
+        <label className="inline-check">
+          <input
+            type="checkbox"
+            checked={mcp?.allowRun ?? false}
+            disabled={!mcp || busy}
+            onChange={(e) => void applyMcp(mcp?.enabled ?? true, port, e.target.checked)}
+          />
+          작업 실행 허용 (끄면 읽기 전용이 됩니다)
+        </label>
+        <div className="hint" style={{ marginBottom: 10 }}>
+          켜 두면 클라이언트가 요청한 작업이 <strong>앱에서 다시 묻지 않고</strong> 큐에 들어갑니다.
+          클라이언트 쪽에도 별도의 도구 승인 설정이 있을 수 있습니다.
+        </div>
+
+        <div className="field">
+          <label htmlFor="mcp-port">포트</label>
+          <input
+            id="mcp-port"
+            type="number"
+            min={1024}
+            max={65535}
+            value={port}
+            disabled={busy}
+            onChange={(e) => setPort(Number(e.target.value))}
+            onBlur={() => {
+              if (mcp && port !== configuredPort && port >= 1024 && port <= 65535) {
+                void applyMcp(mcp.enabled, port, mcp.allowRun);
+              }
+            }}
+          />
+          <div className="hint">
+            사용 중이면 다음 포트로 자동으로 밀립니다. 위의 [상태] 에 실제 주소가 표시됩니다.
+          </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="mcp-config">클라이언트 설정 (ChatGPT 데스크톱 · Codex 의 config.toml)</label>
+          <textarea
+            id="mcp-config"
+            readOnly
+            rows={4}
+            className="mono"
+            style={{ width: "100%", resize: "vertical" }}
+            value={mcp?.clientConfig ?? ""}
+            onFocus={(e) => e.currentTarget.select()}
+          />
+          <div className="hint">
+            이 조각을 <span className="mono">~/.codex/config.toml</span> 에 붙여 넣습니다. 토큰이
+            들어 있으니 다른 사람에게 그대로 보내지 마세요.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => void copyConfig()} disabled={!mcp || busy}>
+            설정 복사
+          </button>
+          <button onClick={() => void regenerate()} disabled={!mcp || busy}>
+            토큰 재발급
+          </button>
         </div>
       </div>
 

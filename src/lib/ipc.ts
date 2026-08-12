@@ -16,6 +16,7 @@ import type {
   JobSpec,
   LociListInfo,
   LogEvent,
+  McpStatus,
   ProgressEvent,
   ProfilesInfo,
   ProvisionEvent,
@@ -76,6 +77,20 @@ export const inspectLociList = (path: string) =>
   invoke<LociListInfo>("inspect_loci_list", { path });
 /** 따라해보기 가이드를 앱 폴더에 꺼내 기본 브라우저로 연다. 반환값은 그 파일 경로. */
 export const guideOpen = () => invoke<string>("guide_open");
+
+// ---------------------------------------------------------------- MCP
+
+export const mcpStatus = () => invoke<McpStatus>("mcp_status");
+/**
+ * MCP 설정을 바꾸고 서버를 다시 띄운다.
+ *
+ * **포트·켬/끔은 `settingsSet` 으로 바꾸면 안 된다** — 그쪽은 값만 저장하고
+ * 실제 리스너는 그대로다.
+ */
+export const mcpConfigure = (enabled: boolean, port: number, allowRun: boolean) =>
+  invoke<McpStatus>("mcp_configure", { enabled, port, allowRun });
+/** 토큰을 새로 발급한다. 기존 클라이언트 설정은 즉시 무효가 된다. */
+export const mcpRegenerateToken = () => invoke<McpStatus>("mcp_regenerate_token");
 
 // ---------------------------------------------------------------- 이벤트
 

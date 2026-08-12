@@ -164,6 +164,29 @@ export interface Settings {
   keepWorkDir: boolean;
   defaultCpu: number | null;
   lastOutputDir: string | null;
+  mcp: McpSettings;
+}
+
+/** Rust `settings::McpSettings` 와 1:1 (`doc/MCP.md`). */
+export interface McpSettings {
+  enabled: boolean;
+  port: number;
+  /** 첫 기동에서 발급된다. 기본값은 빈 문자열이다. */
+  token: string;
+  /** 끄면 읽기 전용 — 실행 도구가 목록에서 사라진다. */
+  allowRun: boolean;
+}
+
+/** Rust `mcp::McpStatus` 와 1:1. 포트는 충돌 시 설정값과 달라질 수 있다. */
+export interface McpStatus {
+  running: boolean;
+  enabled: boolean;
+  allowRun: boolean;
+  port: number | null;
+  url: string | null;
+  token: string;
+  /** 사용자가 클라이언트 설정 파일에 붙여넣을 조각 */
+  clientConfig: string;
 }
 
 export interface DiskUsage {

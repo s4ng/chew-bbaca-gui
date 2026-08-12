@@ -10,16 +10,18 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::api;
 use crate::db::Db;
 use crate::env::probe::firmware_hint;
-use crate::env::{probe, DownloadProgress, EnvReport, Provisioner, RootfsOrigin};
+use crate::env::{DownloadProgress, EnvReport, Provisioner, RootfsOrigin};
 use crate::error::{Error, Result};
 use crate::jobs::JobManager;
+use crate::mcp::{McpServer, McpStatus};
 use crate::models::{Job, JobSpec, SchemaInfo};
 use crate::paths::AppPaths;
 use crate::runner::BackendStatus;
 use crate::schema_store::SchemaStore;
-use crate::settings::Settings;
+use crate::settings::{McpSettings, Settings};
 
 /// 온보딩 ③ 단계 진행 상황. 다운로드 진행률과 단계 전환을 함께 싣는다.
 pub const EVENT_PROVISION: &str = "env://provision";
@@ -31,19 +33,22 @@ pub struct AppState {
     /// Tauri 리소스 디렉터리. 동봉된 rootfs 가 여기 들어 있다 (§8.1).
     /// 개발 실행에서는 리소스가 복사되지 않으므로 파일이 없는 것이 정상이다.
     pub resources: Option<PathBuf>,
+    /// 로컬 MCP 서버 (`doc/MCP.md`). 앱과 수명을 같이 한다.
+    pub mcp: Arc<McpServer>,
 }
 
 impl AppState {
-    fn settings(&self) -> Settings {
+    /// `api.rs` 와 `mcp/` 도 부른다 — 설정은 언제나 DB 가 진실이므로 매번 읽는다.
+    pub(crate) fn settings(&self) -> Settings {
         Settings::load(&self.db)
     }
 
-    fn provisioner(&self) -> Provisioner {
+    pub(crate) fn provisioner(&self) -> Provisioner {
         Provisioner::new(self.paths.clone(), self.settings().distro)
             .with_resources(self.resources.clone())
     }
 
-    fn schemas(&self) -> SchemaStore {
+    pub(crate) fn schemas(&self) -> SchemaStore {
         SchemaStore::new(Arc::clone(&self.db), Arc::clone(self.manager.runner()))
     }
 }
@@ -105,13 +110,13 @@ pub struct DiskUsage {
 /// §7.3 의 게이트 판정. 부작용 없이 읽기만 한다.
 #[tauri::command]
 pub fn env_probe(state: State<'_, AppState>) -> Result<EnvReport> {
-    probe(&state.settings().distro)
+    api::env_probe(state.inner())
 }
 
 /// 백엔드(배포판 + chewBBACA) 상태. 게이트 통과 후 상세 확인용.
 #[tauri::command]
 pub fn backend_status(state: State<'_, AppState>) -> BackendStatus {
-    state.manager.runner().status()
+    api::backend_status(state.inner())
 }
 
 /// 권한 상승 헬퍼로 `wsl --install --no-distribution` 을 대행한다 (§7.5).
@@ -270,43 +275,35 @@ pub fn disk_compact(state: State<'_, AppState>) -> Result<String> {
 
 #[tauri::command]
 pub fn disk_usage(state: State<'_, AppState>) -> DiskUsage {
-    DiskUsage {
-        vhdx_bytes: state.provisioner().vhdx_size(),
-        app_dir: state.paths.root.to_string_lossy().to_string(),
-    }
+    api::disk_usage(state.inner())
 }
 
 // ================================================================ 작업
 
 #[tauri::command]
 pub fn jobs_submit(state: State<'_, AppState>, spec: JobSpec) -> Result<String> {
-    // 다음 실행의 기본값으로 기억해 둔다.
-    let mut settings = state.settings();
-    settings.last_output_dir = Some(spec.output_dir.clone());
-    let _ = settings.save(&state.db);
-
-    state.manager.submit(spec)
+    api::jobs_submit(state.inner(), spec)
 }
 
 #[tauri::command]
 pub fn jobs_list(state: State<'_, AppState>, limit: Option<i64>) -> Result<Vec<Job>> {
-    state.manager.list(limit.unwrap_or(100))
+    api::jobs_list(state.inner(), limit.unwrap_or(100))
 }
 
 #[tauri::command]
 pub fn jobs_get(state: State<'_, AppState>, job_id: String) -> Result<Option<Job>> {
-    state.manager.get(&job_id)
+    api::jobs_get(state.inner(), &job_id)
 }
 
 #[tauri::command]
 pub fn jobs_cancel(state: State<'_, AppState>, job_id: String) -> Result<()> {
-    state.manager.cancel(&job_id)
+    api::jobs_cancel(state.inner(), &job_id)
 }
 
 /// 로그 파일 전체. UI 가 이벤트를 놓쳤거나 앱을 다시 켠 경우 이걸로 복원한다.
 #[tauri::command]
 pub fn jobs_log(state: State<'_, AppState>, job_id: String) -> Result<String> {
-    state.manager.read_log(&job_id)
+    api::jobs_log(state.inner(), &job_id)
 }
 
 /// 앱 시작 시 조정 (§6.3). 살아 있는 작업 목록을 돌려주면 UI 가
@@ -322,73 +319,18 @@ pub fn jobs_adopted(state: State<'_, AppState>) -> Result<Vec<Job>> {
     state.manager.adopted_jobs()
 }
 
-/// 평가 리포트 HTML 을 기본 브라우저로 연다.
-///
-/// 앱 웹뷰에 띄우지 않는 이유는 CSP 와 asset 프로토콜을 열어야 하기 때문만이
-/// 아니다 — 리포트는 확대·검색·인쇄가 되는 브라우저에서 보는 편이 낫다.
-///
-/// **여는 것까지 Rust 가 한다.** 프런트의 `openPath` 는 스코프가 비어 있어
-/// 어떤 경로도 통과하지 못한다 (`guide_open` 의 주석 참조).
+/// 평가 리포트 HTML 을 기본 브라우저로 연다. 실제 동작은 `api::report_open` 에 있다
+/// (MCP 도구도 같은 함수를 부른다).
 #[tauri::command]
 pub fn report_open(app: AppHandle, state: State<'_, AppState>, job_id: String) -> Result<String> {
-    use tauri_plugin_opener::OpenerExt;
-
-    let job = state
-        .manager
-        .get(&job_id)?
-        .ok_or_else(|| Error::JobNotFound(job_id.clone()))?;
-    let dir = job.output_path.as_deref().unwrap_or_default();
-    if dir.is_empty() {
-        return Err(Error::Other(
-            "결과가 아직 회수되지 않아 리포트를 찾을 수 없습니다".into(),
-        ));
-    }
-
-    let path = find_report(Path::new(dir), job.module).ok_or_else(|| {
-        Error::Other(format!(
-            "결과 폴더에서 리포트 HTML 을 찾지 못했습니다.\n폴더를 직접 열어 확인하세요: {dir}"
-        ))
-    })?;
-
-    app.opener()
-        .open_path(path.to_string_lossy(), None::<&str>)
-        .map_err(|e| {
-            Error::Other(format!(
-                "리포트를 열지 못했습니다: {e}\n파일은 여기 있습니다: {}",
-                path.display()
-            ))
-        })?;
-    Ok(path.to_string_lossy().to_string())
-}
-
-/// 회수된 결과 폴더에서 리포트 HTML 을 찾는다.
-///
-/// 파일 이름은 3.5.4 를 직접 돌려 확인했다 (2026-08-11). 그래도 이름만 믿지 않고
-/// `*_report.html` 로 한 번 더 훑는다 — 판올림으로 이름이 바뀌어도 열리도록.
-fn find_report(dir: &Path, module: crate::models::Module) -> Option<PathBuf> {
-    use crate::models::Module;
-
-    let known = match module {
-        Module::SchemaEvaluator => "schema_report.html",
-        Module::AlleleCallEvaluator => "allelecall_report.html",
-        _ => return None,
-    };
-    let direct = dir.join(known);
-    if direct.is_file() {
-        return Some(direct);
-    }
-    std::fs::read_dir(dir).ok()?.flatten().find_map(|e| {
-        let p = e.path();
-        let name = p.file_name()?.to_string_lossy().to_ascii_lowercase();
-        (name.ends_with("_report.html") && p.is_file()).then_some(p)
-    })
+    api::report_open(&app, state.inner(), &job_id)
 }
 
 // ================================================================ 스키마
 
 #[tauri::command]
 pub fn schemas_list(state: State<'_, AppState>) -> Result<Vec<SchemaInfo>> {
-    state.schemas().list()
+    api::schemas_list(state.inner())
 }
 
 #[tauri::command]
@@ -423,6 +365,56 @@ pub fn settings_get(state: State<'_, AppState>) -> Settings {
 #[tauri::command]
 pub fn settings_set(state: State<'_, AppState>, settings: Settings) -> Result<()> {
     settings.save(&state.db)
+}
+
+// ================================================================ MCP
+
+/// 로컬 MCP 서버의 현재 상태. 설정 화면이 그대로 표시한다 (`doc/MCP.md` §7).
+#[tauri::command]
+pub fn mcp_status(state: State<'_, AppState>) -> McpStatus {
+    state.mcp.status(state.inner())
+}
+
+/// MCP 설정을 바꾸고 서버를 다시 띄운다.
+///
+/// **`settings_set` 으로는 리스너가 갱신되지 않는다.** 포트나 켬/끔이 바뀌면
+/// 실제로 열린 소켓을 바꿔야 하므로 전용 명령을 둔다.
+#[tauri::command]
+pub fn mcp_configure(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+    port: u16,
+    allow_run: bool,
+) -> Result<McpStatus> {
+    let mut settings = state.settings();
+    settings.mcp.enabled = enabled;
+    settings.mcp.port = port;
+    settings.mcp.allow_run = allow_run;
+    settings.save(&state.db)?;
+
+    state.mcp.stop();
+    if enabled {
+        state.mcp.start(&app)?;
+    }
+    Ok(state.mcp.status(state.inner()))
+}
+
+/// 토큰을 새로 발급한다. **기존 클라이언트 설정은 즉시 무효가 된다** —
+/// UI 에서 확인을 받은 뒤 호출하고, 새 설정 조각을 다시 안내해야 한다.
+#[tauri::command]
+pub fn mcp_regenerate_token(app: AppHandle, state: State<'_, AppState>) -> Result<McpStatus> {
+    let mut settings = state.settings();
+    settings.mcp.token = McpSettings::new_token();
+    settings.save(&state.db)?;
+
+    // 토큰은 요청마다 DB 에서 읽으므로 재기동이 꼭 필요하지는 않지만,
+    // 접속 정보 파일(mcp.json)을 새 값으로 다시 쓰기 위해 한 번 돌린다.
+    state.mcp.stop();
+    if settings.mcp.enabled {
+        state.mcp.start(&app)?;
+    }
+    Ok(state.mcp.status(state.inner()))
 }
 
 /// 경로가 실제로 존재하고 FASTA 로 보이는 파일이 몇 개인지 알려준다.
@@ -620,47 +612,7 @@ mod tests {
         path
     }
 
-    /// 리포트 파일 이름은 3.5.4 를 직접 돌려 확인한 값이다 (2026-08-11).
-    /// 여기서 굳혀 두지 않으면 [리포트 열기] 가 조용히 아무것도 못 찾게 된다.
-    #[test]
-    fn finds_each_module_report_by_its_measured_name() {
-        use crate::models::Module;
-
-        for (module, name) in [
-            (Module::SchemaEvaluator, "schema_report.html"),
-            (Module::AlleleCallEvaluator, "allelecall_report.html"),
-        ] {
-            let dir = std::env::temp_dir().join(format!("chewie-report-{name}"));
-            std::fs::create_dir_all(&dir).unwrap();
-            // 리포트 옆에는 같은 확장자가 아닌 큰 부산물들이 함께 놓인다.
-            std::fs::write(dir.join("report_bundle.js"), "x").unwrap();
-            std::fs::write(dir.join(name), "<html>").unwrap();
-
-            let found = find_report(&dir, module).expect("리포트를 찾지 못했다");
-            assert_eq!(found.file_name().unwrap(), name);
-        }
-    }
-
-    #[test]
-    fn falls_back_to_any_report_html_when_the_name_changed() {
-        // 판올림으로 이름이 바뀌어도 열리기는 해야 한다.
-        let dir = std::env::temp_dir().join("chewie-report-renamed");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("something_report.html"), "<html>").unwrap();
-
-        let found = find_report(&dir, crate::models::Module::SchemaEvaluator).unwrap();
-        assert_eq!(found.file_name().unwrap(), "something_report.html");
-    }
-
-    #[test]
-    fn other_modules_have_no_report() {
-        // 평가 모듈이 아니면 결과 폴더에 리포트 비슷한 것이 있어도 찾지 않는다.
-        let dir = std::env::temp_dir().join("chewie-report-notmine");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("schema_report.html"), "<html>").unwrap();
-
-        assert!(find_report(&dir, crate::models::Module::AlleleCall).is_none());
-    }
+    // 리포트 탐색(`find_report`) 테스트는 `api.rs` 로 함께 옮겼다.
 
     #[test]
     fn allelic_profile_table_is_accepted() {

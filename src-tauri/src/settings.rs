@@ -23,6 +23,48 @@ pub struct Settings {
     pub default_cpu: Option<u32>,
     /// 새 작업 폼의 기본 출력 폴더
     pub last_output_dir: Option<String>,
+    pub mcp: McpSettings,
+}
+
+/// 로컬 MCP 서버 설정 (`doc/MCP.md`).
+///
+/// 이 값들은 **앱이 소유한 것만** 다룬다 — 클라이언트 쪽 설정 파일은 건드리지 않고,
+/// 사용자가 붙여넣을 조각만 만들어 준다.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct McpSettings {
+    pub enabled: bool,
+    pub port: u16,
+    /// 베어러 토큰. **비어 있으면 첫 기동에서 발급해 저장한다.**
+    /// 기본값에 박아두면 모든 설치본이 같은 토큰을 쓰게 된다.
+    pub token: String,
+    /// 끄면 읽기 전용이 된다 — 실행 도구를 목록에서 빼고 호출도 거절한다.
+    ///
+    /// 승인 UI 를 만들지 않은 것은 의도된 선택이다. 앱을 보고 있지 않으면 작업이
+    /// 그대로 멈추기 때문에, 자동 승인을 기본으로 두고 통째로 끄는 스위치만 준다.
+    pub allow_run: bool,
+}
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: 8787,
+            token: String::new(),
+            allow_run: true,
+        }
+    }
+}
+
+impl McpSettings {
+    /// 새 베어러 토큰. UUID v4 둘을 이어 붙여 64자리 16진수를 만든다.
+    pub fn new_token() -> String {
+        format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        )
+    }
 }
 
 impl Default for Settings {
@@ -43,6 +85,7 @@ impl Default for Settings {
             keep_work_dir: false,
             default_cpu: None,
             last_output_dir: None,
+            mcp: McpSettings::default(),
         }
     }
 }
@@ -110,5 +153,28 @@ mod tests {
         let loaded = Settings::load(&db);
         assert!(loaded.keep_work_dir);
         assert_eq!(loaded.distro, "chewie-env");
+    }
+
+    #[test]
+    fn settings_saved_before_mcp_existed_still_load() {
+        // 0.2.x 에서 만들어진 행에는 mcp 키가 없다. 컨테이너 default 가 채워야 한다 —
+        // 안 채워지면 앱이 설정을 통째로 기본값으로 되돌린다.
+        let db = Db::open_memory().unwrap();
+        db.set_setting(KEY, r#"{"distro":"chewie-env","keepWorkDir":true}"#)
+            .unwrap();
+        let loaded = Settings::load(&db);
+        assert!(loaded.keep_work_dir, "기존 값이 살아 있어야 한다");
+        assert!(loaded.mcp.enabled);
+        assert_eq!(loaded.mcp.port, 8787);
+    }
+
+    #[test]
+    fn a_fresh_token_is_not_baked_into_the_default() {
+        // 기본값에 토큰을 박아두면 모든 설치본이 같은 토큰을 쓴다.
+        assert!(McpSettings::default().token.is_empty());
+        let a = McpSettings::new_token();
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, McpSettings::new_token());
     }
 }

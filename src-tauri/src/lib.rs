@@ -10,11 +10,13 @@
 //!     └──▶ AppHandle (이벤트 방출)
 //! ```
 
+mod api;
 mod commands;
 mod db;
 mod env;
 mod error;
 mod jobs;
+mod mcp;
 mod models;
 mod paths;
 mod runner;
@@ -30,6 +32,7 @@ use tauri::Manager;
 use crate::commands::AppState;
 use crate::db::Db;
 use crate::jobs::JobManager;
+use crate::mcp::McpServer;
 use crate::paths::AppPaths;
 use crate::runner::wsl::WslRunner;
 use crate::runner::ChewieRunner;
@@ -66,7 +69,16 @@ pub fn run() {
                 paths,
                 manager,
                 resources,
+                mcp: Arc::new(McpServer::new()),
             });
+
+            // MCP 서버는 **상태를 등록한 뒤에** 띄운다 — 요청 스레드가 곧바로
+            // `AppState` 를 찾기 때문이다. 실패해도 앱은 정상 동작해야 하므로
+            // (포트 충돌 등) 여기서 세우지 않고 설정 화면이 상태를 보여준다.
+            let handle = app.handle().clone();
+            if let Err(e) = handle.state::<AppState>().mcp.start(&handle) {
+                eprintln!("MCP 서버를 시작하지 못했습니다: {e}");
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -99,7 +111,17 @@ pub fn run() {
             commands::inspect_profiles_file,
             commands::inspect_loci_list,
             commands::guide_open,
+            commands::mcp_status,
+            commands::mcp_configure,
+            commands::mcp_regenerate_token,
         ])
-        .run(tauri::generate_context!())
-        .expect("Tauri 애플리케이션을 시작하지 못했습니다");
+        // `run()` 대신 `build()` 를 쓰는 이유는 종료 훅 하나 때문이다 — 리스너를
+        // 닫아 두지 않으면 포트가 잠깐 물려 있어 다시 켤 때 다음 포트로 밀린다.
+        .build(tauri::generate_context!())
+        .expect("Tauri 애플리케이션을 시작하지 못했습니다")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<AppState>().mcp.stop();
+            }
+        });
 }
