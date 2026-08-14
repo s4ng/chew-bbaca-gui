@@ -119,14 +119,28 @@ loci 목록 검사, `cds_coordinates.tsv` 전제 검사, `validate_host_path()` 
 | `chewie_job_log(jobId, tail=200)` | 로그 **꼬리만**. 전체는 수 MB다 | 읽기 |
 | `chewie_inspect(path)` | `inspect_input_dir`·`inspect_profiles_file`·`inspect_loci_list` 를 경로 종류로 분기한 하나 | 읽기 |
 | `chewie_module_help(module?)` | 인자·전제·함정 (§5) | 읽기 |
+| `chewie_list_training_files` | 저장소의 `.trn` 목록. `ptf` 에 넣을 값의 출처 | 읽기 |
 | `chewie_create_schema` … `chewie_allele_call_evaluator` (8개) | 작업 제출 → `jobId` 즉시 반환 | 실행 |
 | `chewie_cancel(jobId)` | `kill -TERM -{PGID}` 경로 (§6.2) | 실행 |
 | `chewie_open_report(jobId)` | 기본 브라우저로 리포트를 연다 | 실행 |
+| `chewie_create_training_file(name, genomeDir, genomeFile?)` | 게놈 폴더에서 하나를 골라 `.trn` 을 만들어 저장소에 넣는다 | 실행 |
+
+### `chewie_create_training_file` 이 예외인 이유
+
+**작업(Job)이 아닌 유일한 실행 도구다.** 게놈 하나 학습은 수십 초라 `jobId` 를 주고
+폴링시키는 편이 오히려 번거롭고, `build_argv` 의 argv[0] 은 언제나 `chewBBACA.py` 인데
+이것만 `pyrodigal` 을 부른다 — 모듈로 만들면 그 불변식이 깨진다.
+
+**출력 경로를 받지 않는 것이 안전 설계의 핵심이다.** 이름만 받아 앱 소유 폴더
+(`%LOCALAPPDATA%\ChewieApp\training\`)에 쓰고, 같은 이름이 있으면 덮어쓰지 않고 거절한다.
+그래서 이 도구에는 되돌릴 수 없는 조작이 없다 — 아래 규칙에 걸리지 않는 이유가 이것이다.
+`referenceGenome` 격인 `genomeDir` 은 **읽기만** 하며, 그 노출은 `chewie_inspect` 나
+`chewie_create_schema(inputDir)` 와 같은 수준이라 새로 늘어나는 것이 없다.
 
 ### 노출하지 않는 것
 
-`schemas_delete` · `env_unregister` · `env_provision` · `env_install_wsl` ·
-`env_reboot_to_firmware` · `disk_compact` · `settings_set`.
+`schemas_delete` · `training_delete` · `env_unregister` · `env_provision` ·
+`env_install_wsl` · `env_reboot_to_firmware` · `disk_compact` · `settings_set`.
 
 CLAUDE.md 의 "되돌릴 수 없는 조작은 UI 에서 확인을 받은 뒤 호출한다"를 MCP 로 번역하면
 **확인을 받을 UI 가 없는 채널에는 아예 주지 않는다**가 된다. 배포판 제거와 재부팅을
@@ -238,7 +252,7 @@ P0~P2 를 모두 구현했다. 아래는 개발 실행에 HTTP 로 직접 붙어
 | Rust 테스트 | **86/86 통과** (MCP 관련 15개 추가) |
 | `initialize` | `protocolVersion` 협상, `serverInfo.version = 0.3.0` |
 | `notifications/initialized` | 202, 본문 없음 |
-| `tools/list` | **17개** (읽기 7 + 실행 8 + cancel + open_report) |
+| `tools/list` | **17개** (읽기 7 + 실행 8 + cancel + open_report) — 이후 training file 도구 2개가 늘어 지금은 20개다 |
 | `tools/call chewie_status` | 배포판 준비됨, chewBBACA 3.5.4, CPU 12, vhdx 2.18GB |
 | `resources/read chewie://modules/*` | 모듈 사용법 반환 |
 | 토큰 없음 / 틀린 토큰 | 401 |

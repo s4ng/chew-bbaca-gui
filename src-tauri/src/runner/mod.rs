@@ -194,6 +194,15 @@ pub trait ChewieRunner: Send + Sync {
     /// 백엔드 디렉터리를 Windows 폴더로 내보낸다.
     fn export_dir(&self, backend_path: &str, host_dest: &Path) -> Result<()>;
 
+    /// 참조 게놈 하나로 Prodigal training file 을 만든다.
+    ///
+    /// **작업(Job)이 아니라 동기 호출이다.** 게놈 하나 학습은 수십 초면 끝나고
+    /// 산출물이 파일 하나뿐이라, PGID·취소·고아 복구 기계장치가 전부 놀게 된다.
+    ///
+    /// 이름에 구현(pyrodigal)이 드러나지 않는 것은 의도적이다 — 그것은 경계
+    /// 아래의 사실이고, macOS 러너가 생기면 다른 것을 부를 수도 있다.
+    fn create_training_file(&self, host_genome: &Path, host_output: &Path) -> Result<()>;
+
     /// 완료된 작업의 임시 공간을 비운다.
     fn cleanup_work(&self, job_id: &str) -> Result<()>;
 }

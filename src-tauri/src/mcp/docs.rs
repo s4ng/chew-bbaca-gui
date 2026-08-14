@@ -46,6 +46,7 @@ pub fn doc(module: Module) -> ModuleDoc {
             ],
             gotchas: &[
                 "입력이 이미 CDS 라면 cdsInput 을 켠다. 켜면 Prodigal 단계가 통째로 사라져 훨씬 빠르지만, 그 결과로 만든 스키마로 AlleleCall 을 돌리면 cds_coordinates.tsv 가 생기지 않아 AlleleCallEvaluator 를 쓸 수 없다.",
+                "ptf 를 비우면 Pyrodigal 이 게놈마다 따로 학습해 CDS 경계가 조금씩 달라지고, 그 결과 불필요한 신규 allele(INF)과 길이 이탈(ASM/ALM)이 늘어난다. chewBBACA 도 CLI 에서 training file 을 넣으라고 권고한다. chewie_list_training_files 로 있는 것을 확인하고, 없으면 chewie_create_training_file 로 만든다.",
                 "실제 어셈블리에서는 클러스터별 BLASTp 가 전체 시간의 약 73% 를 차지한다. 완성 게놈 32개 기준 38초(--cpu 8).",
                 "같은 이름으로 여러 번 만들 수 있다. 스키마 ID 는 이름과 작업 ID 로 만들어져 서로 덮어쓰지 않는다.",
             ],
@@ -84,6 +85,7 @@ pub fn doc(module: Module) -> ModuleDoc {
             gotchas: &[
                 "이 모듈은 -o 아래에 schema_seed/ 를 만들지 않고 loci FASTA 를 바로 푼다. 앱이 그 사실에 맞춰 경로를 겨누므로 사용자가 신경 쓸 것은 없다.",
                 "부산물(schema_seed_invalid_loci.txt 등)은 스키마 폴더 최상위에 놓인다.",
+                "외부 스키마에 training file 이 함께 왔다면 ptf 로 넣는다. 없으면 chewie_create_training_file 로 만들 수 있지만, 원 스키마가 어떤 것으로 만들어졌는지 모르는 채로 다른 것을 넣으면 CDS 경계가 어긋난다 — 함께 온 것이 없으면 비워두는 편이 안전하다.",
                 "들여온 스키마로 AlleleCall 이 정상 완주하는 것은 확인되어 있다.",
             ],
         },

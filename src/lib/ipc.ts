@@ -11,6 +11,7 @@ import type {
   DiskUsage,
   EnvReport,
   FirmwareHint,
+  GenomeScan,
   InputDirInfo,
   Job,
   JobSpec,
@@ -24,6 +25,8 @@ import type {
   SchemaInfo,
   Settings,
   StateEvent,
+  TrainingCreated,
+  TrainingFile,
 } from "./types";
 
 // ---------------------------------------------------------------- 환경
@@ -65,6 +68,22 @@ export const schemasImport = (dir: string, name: string) =>
   invoke<SchemaInfo>("schemas_import", { dir, name });
 export const schemasExport = (schemaId: string, dest: string) =>
   invoke<string>("schemas_export", { schemaId, dest });
+
+// ---------------------------------------------------------------- training file
+
+export const trainingList = () => invoke<TrainingFile[]>("training_list");
+/**
+ * 게놈 폴더를 훑어 학습 후보를 추린다. 파일을 만들지 않는다.
+ *
+ * **폴더의 FASTA 를 전부 읽는다** — contig 수는 파일 크기로 알 수 없다.
+ * 게놈 수백 개면 수 초가 걸리므로 부르는 쪽에서 진행 표시를 띄운다.
+ */
+export const trainingScan = (path: string) => invoke<GenomeScan>("training_scan", { path });
+/** 게놈 하나를 골라 학습시키고 저장소에 넣는다. 수십 초 걸린다. */
+export const trainingCreate = (name: string, genomeDir: string, genomeFile?: string | null) =>
+  invoke<TrainingCreated>("training_create", { name, genomeDir, genomeFile: genomeFile ?? null });
+/** 되돌릴 수 없다. 확인을 받은 뒤 부른다. */
+export const trainingDelete = (name: string) => invoke<void>("training_delete", { name });
 
 // ---------------------------------------------------------------- 설정
 

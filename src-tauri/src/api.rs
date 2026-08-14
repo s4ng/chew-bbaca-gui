@@ -14,8 +14,10 @@ use tauri::AppHandle;
 use crate::commands::{AppState, DiskUsage};
 use crate::env::EnvReport;
 use crate::error::{Error, Result};
+use crate::fasta::GenomeScan;
 use crate::models::{Job, JobSpec, Module, SchemaInfo};
 use crate::runner::BackendStatus;
+use crate::training_store::{TrainingCreated, TrainingFile};
 
 // ================================================================ 환경
 
@@ -65,6 +67,34 @@ pub fn jobs_log(state: &AppState, job_id: &str) -> Result<String> {
 
 pub fn schemas_list(state: &AppState) -> Result<Vec<SchemaInfo>> {
     state.schemas().list()
+}
+
+// ================================================================ training file
+
+pub fn training_list(state: &AppState) -> Result<Vec<TrainingFile>> {
+    state.training().list()
+}
+
+/// 게놈 폴더를 훑어 학습 후보를 추린다. 파일을 만들지 않는다.
+pub fn training_scan(state: &AppState, genome_dir: &Path) -> Result<GenomeScan> {
+    state.training().scan(genome_dir)
+}
+
+/// 폴더에서 게놈 하나를 골라 학습시키고 저장소에 넣는다.
+///
+/// `genome_file` 은 UI 가 사용자의 선택을 넘기는 자리다. MCP 는 생략해 앱이
+/// 고르게 한다 — **게이트와 선별 규칙은 어느 쪽이든 여기 한 벌뿐이다.**
+pub fn training_create(
+    state: &AppState,
+    name: &str,
+    genome_dir: &Path,
+    genome_file: Option<&Path>,
+) -> Result<TrainingCreated> {
+    state.training().create(name, genome_dir, genome_file)
+}
+
+pub fn training_delete(state: &AppState, name: &str) -> Result<()> {
+    state.training().delete(name)
 }
 
 // ================================================================ 리포트

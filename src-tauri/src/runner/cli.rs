@@ -149,6 +149,31 @@ pub fn build_argv(module: Module, a: &BackendArgs) -> Vec<String> {
     v
 }
 
+/// Prodigal training file(`.trn`)을 만드는 인자.
+///
+/// **`chewBBACA.py` 가 아니다.** 이것만 다른 프로그램을 부르므로 `build_argv` 와
+/// 섞지 않는다 — 그쪽의 argv[0] 은 언제나 `chewBBACA.py` 이고, `Module` 은 곧
+/// 그 하위 명령이라는 불변식이 있다.
+///
+/// 부르는 것이 `prodigal` 이 아니라 `pyrodigal` 인 이유: chewBBACA 3.x 는
+/// Prodigal 바이너리를 쓰지 않고 pyrodigal 로 갈아탔고, rootfs 에도 그쪽만
+/// 들어 있다(`prodigal` 은 없다). 인자와 `.trn` 형식은 서로 호환된다.
+pub fn training_argv(genome: &str, output: &str) -> Vec<String> {
+    vec![
+        "pyrodigal".into(),
+        // 학습은 single 모드에서만 일어난다. meta 는 미리 만들어진 모델을 쓴다.
+        "-p".into(),
+        "single".into(),
+        "-i".into(),
+        genome.into(),
+        "-t".into(),
+        output.into(),
+        // 유전자 예측 결과(GFF)는 버린다. 필요한 것은 `-t` 가 쓰는 `.trn` 뿐이다.
+        "-o".into(),
+        "/dev/null".into(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,5 +272,21 @@ mod tests {
     fn allele_call_omits_gl_when_absent() {
         let v = build_argv(Module::AlleleCall, &args());
         assert!(!v.contains(&"--gl".to_string()));
+    }
+
+    #[test]
+    fn training_argv_trains_in_single_mode_and_discards_the_gff() {
+        let v = training_argv("/mnt/c/g/ref.fna", "/mnt/c/trn/b-fragilis.trn");
+        assert_eq!(v[0], "pyrodigal");
+
+        let p = v.iter().position(|x| x == "-p").unwrap();
+        assert_eq!(v[p + 1], "single", "meta 모드는 학습을 하지 않는다");
+
+        let t = v.iter().position(|x| x == "-t").unwrap();
+        assert_eq!(v[t + 1], "/mnt/c/trn/b-fragilis.trn");
+
+        // `-o` 를 빠뜨리면 예측 결과가 stdout 으로 쏟아진다.
+        let o = v.iter().position(|x| x == "-o").unwrap();
+        assert_eq!(v[o + 1], "/dev/null");
     }
 }

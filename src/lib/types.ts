@@ -111,6 +111,42 @@ export interface SchemaInfo {
   lociCount: number | null;
 }
 
+// ---------------------------------------------------------------- training file
+
+/** 저장소의 `.trn` 하나 (Rust `training_store::TrainingFile` 와 1:1) */
+export interface TrainingFile {
+  /** 확장자를 뺀 이름. 저장소 안에서 유일하며 삭제할 때의 키다 */
+  name: string;
+  /** ptf 에 그대로 넣는 Windows 절대 경로 */
+  path: string;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+/** 훑은 게놈 하나의 통계 (Rust `fasta::GenomeStat` 와 1:1) */
+export interface GenomeStat {
+  path: string;
+  fileName: string;
+  /** contig 수. 완성 게놈이면 1~2 다 */
+  contigs: number;
+  bases: number;
+}
+
+/** 게놈 폴더를 훑은 결과 (Rust `fasta::GenomeScan` 와 1:1). 첫 후보가 권장값이다 */
+export interface GenomeScan {
+  candidates: GenomeStat[];
+  scanned: number;
+  medianBases: number;
+  reason: string;
+}
+
+/** 새로 만든 training file (Rust `training_store::TrainingCreated` 와 1:1) */
+export interface TrainingCreated {
+  file: TrainingFile;
+  picked: GenomeStat;
+  reason: string;
+}
+
 /** §7.3 의 게이트. 다음에 보여줄 화면을 그대로 결정한다. */
 export type Gate =
   | "ready"

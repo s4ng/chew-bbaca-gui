@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
+import TrainingFileField from "../components/TrainingFileField";
 import { MODULE_INFO, MODULE_STEP, STEP_LABEL } from "../lib/format";
 import {
   backendStatus,
@@ -443,21 +444,12 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               </div>
             </div>
 
-            <div className="field">
-              <label htmlFor="ptf">Prodigal training file (.trn) — 선택</label>
-              <div className="row">
-                <input id="ptf" type="text" value={ptf} readOnly placeholder="(선택) 종별 .trn 파일" />
-                <button onClick={() => void pickFile(setPtf, "Prodigal training file", ["trn"])}>
-                  찾아보기
-                </button>
-                {ptf && <button onClick={() => setPtf("")}>지우기</button>}
-              </div>
-              <div className="hint">
-                지정한 training file 은 스키마 안에 함께 보관되고, 이후 AlleleCall 에서 계속
-                같은 것이 쓰입니다. 결과 일관성을 위해 중간에 바꾸지 않습니다.
-              </div>
-            </div>
-
+            <TrainingFileField
+              id="ptf"
+              value={ptf}
+              onChange={setPtf}
+              hint="이 training file 은 스키마 안에 함께 보관되고, 이후 AlleleCall 에서 계속 같은 것이 쓰입니다. 결과 일관성을 위해 중간에 바꾸지 않습니다."
+            />
           </>
         )}
 
@@ -509,20 +501,12 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 좋습니다.
               </div>
             </div>
-            <div className="field">
-              <label htmlFor="ptf2">Prodigal training file (.trn) — 선택</label>
-              <div className="row">
-                <input id="ptf2" type="text" value={ptf} readOnly placeholder="(선택) 종별 .trn 파일" />
-                <button onClick={() => void pickFile(setPtf, "Prodigal training file", ["trn"])}>
-                  찾아보기
-                </button>
-                {ptf && <button onClick={() => setPtf("")}>지우기</button>}
-              </div>
-              <div className="hint">
-                외부 스키마에 training file 이 함께 제공됐다면 넣어주세요. 이후 AlleleCall 에서
-                계속 같은 것이 쓰입니다.
-              </div>
-            </div>
+            <TrainingFileField
+              id="ptf2"
+              value={ptf}
+              onChange={setPtf}
+              hint="외부 스키마에 함께 제공된 training file 이라면 그대로 쓰면 됩니다. 원 스키마가 무엇으로 만들어졌는지 모른 채 다른 것을 넣으면 CDS 경계가 어긋납니다."
+            />
           </>
         )}
 

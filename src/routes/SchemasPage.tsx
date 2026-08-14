@@ -2,9 +2,16 @@ import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { formatTime } from "../lib/format";
-import { schemasDelete, schemasExport, schemasImport, schemasList } from "../lib/ipc";
-import { asAppError, type SchemaInfo } from "../lib/types";
+import { formatBytes, formatTime } from "../lib/format";
+import {
+  schemasDelete,
+  schemasExport,
+  schemasImport,
+  schemasList,
+  trainingDelete,
+  trainingList,
+} from "../lib/ipc";
+import { asAppError, type SchemaInfo, type TrainingFile } from "../lib/types";
 
 export default function SchemasPage() {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
@@ -157,6 +164,94 @@ export default function SchemasPage() {
           ))}
         </div>
       )}
+
+      <TrainingFiles onError={setError} />
     </>
+  );
+}
+
+/**
+ * training file 저장소 (`%LOCALAPPDATA%\ChewieApp\training\`).
+ *
+ * 스키마 화면에 붙인 이유는 두 가지다 — `.trn` 은 스키마의 일부처럼 쓰이는
+ * 물건이고, 만드는 화면(새 작업)에서 "이미 같은 이름이 있습니다" 로 막혔을 때
+ * **지울 수 있는 곳이 어딘가 있어야** 한다.
+ */
+function TrainingFiles({ onError }: { onError: (m: string | null) => void }) {
+  const [files, setFiles] = useState<TrainingFile[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const refresh = useCallback(
+    () =>
+      trainingList()
+        .then(setFiles)
+        .catch(() => setFiles([])),
+    [],
+  );
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const remove = async (f: TrainingFile) => {
+    const ok = window.confirm(
+      `training file '${f.name}' 를 삭제합니다.\n이미 이것으로 만든 스키마는 자기 안에 사본을 갖고 있어 영향받지 않습니다.\n되돌릴 수 없습니다. 계속할까요?`,
+    );
+    if (!ok) return;
+    setBusy(f.name);
+    try {
+      await trainingDelete(f.name);
+      await refresh();
+      onError(null);
+    } catch (e) {
+      onError(asAppError(e).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 32 }}>
+      <h2>Prodigal training file</h2>
+      <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
+        스키마를 만들 때 쓰는 종별 학습 파일입니다. [새 작업] → CreateSchema 의 training file
+        칸에서 게놈 폴더를 고르면 만들 수 있습니다. chewBBACA 가 배포하는 것은 19개 종뿐이라,
+        그 밖의 종은 직접 만들어야 합니다.
+      </p>
+
+      {files.length === 0 ? (
+        <div className="empty">
+          <p>아직 training file 이 없습니다.</p>
+        </div>
+      ) : (
+        <div className="stack">
+          {files.map((f) => (
+            <div key={f.path} className="card tight">
+              <div className="row spread">
+                <div>
+                  <strong>{f.name}</strong>
+                  <div className="path">{f.path}</div>
+                </div>
+                <button className="danger" disabled={busy === f.name} onClick={() => void remove(f)}>
+                  삭제
+                </button>
+              </div>
+              <table className="kv" style={{ marginTop: 8 }}>
+                <tbody>
+                  <tr>
+                    <td>만든 날짜</td>
+                    <td>{formatTime(f.createdAt)}</td>
+                  </tr>
+                  <tr>
+                    <td>크기</td>
+                    <td>{formatBytes(f.sizeBytes)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

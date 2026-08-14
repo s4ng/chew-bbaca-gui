@@ -17,7 +17,7 @@ use std::thread;
 use crate::error::{Error, Result};
 use crate::models::{JobSpec, Module, ModuleParams};
 use crate::paths::validate_host_path;
-use crate::runner::cli::{build_argv, BackendArgs};
+use crate::runner::cli::{build_argv, training_argv, BackendArgs};
 use crate::runner::{
     schema_id_for, schema_name_of, BackendStatus, ChewieRunner, CreatedSchema, EventSink,
     JobHandle, RunEvent, RunOutcome,
@@ -715,6 +715,45 @@ impl ChewieRunner for WslRunner {
     fn cleanup_work(&self, job_id: &str) -> Result<()> {
         let work = self.work_dir(job_id)?;
         self.bash(&format!("rm -rf {}", sh_quote(&work)))?;
+        Ok(())
+    }
+
+    fn create_training_file(&self, host_genome: &Path, host_output: &Path) -> Result<()> {
+        validate_host_path(host_genome)?;
+        validate_host_path(host_output)?;
+
+        // 입력은 게놈 하나(수 MB), 출력은 `.trn` 하나(수십 KB)다. 스테이징하지 않고
+        // `/mnt/c` 를 그대로 쓴다 — §5.2 의 복사 규칙은 수천 개 파일을 다루는
+        // 모듈 이야기이고, 여기서는 복사가 오히려 왕복을 늘린다.
+        let genome = self.to_backend_path(host_genome)?;
+
+        // 출력 파일은 아직 없다. `wslpath` 에 없는 파일을 그대로 넘기지 않고
+        // **부모 폴더를 변환한 뒤 이름을 붙인다** — 부모까지 없으면 변환이 실패한다.
+        let parent = host_output.parent().ok_or_else(|| {
+            Error::InvalidInput(format!(
+                "training file 을 둘 폴더를 알 수 없습니다: {}",
+                host_output.display()
+            ))
+        })?;
+        let file_name = host_output
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .ok_or_else(|| Error::InvalidInput("training file 이름이 비어 있습니다".into()))?;
+        let output = format!("{}/{}", self.to_backend_path(parent)?, file_name);
+
+        let script = training_argv(&genome, &output)
+            .iter()
+            .map(|a| sh_quote(a))
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // pyrodigal 이 실패하면 Python 트레이스백이 그대로 올라온다. 사용자에게는
+        // 그것만으로 아무 도움이 안 되므로 무엇을 확인해야 하는지를 앞에 붙인다.
+        self.bash(&script)?.require_success().map_err(|e| {
+            Error::Other(format!(
+                "training file 을 만들지 못했습니다.\n고른 파일이 게놈 FASTA 가 맞는지, 서열이 충분히 긴지 확인하세요.\n\n{e}"
+            ))
+        })?;
         Ok(())
     }
 }

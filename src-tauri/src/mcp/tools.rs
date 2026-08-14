@@ -71,6 +71,12 @@ pub fn list(allow_run: bool) -> Vec<Value> {
             &["path"],
         ),
         tool(
+            "chewie_list_training_files",
+            "앱이 보관 중인 Prodigal training file(.trn) 목록. CreateSchema·PrepExternalSchema 의 ptf 인자에 넣을 값을 여기서 얻는다. chewBBACA 는 19개 종의 training file 만 배포하므로, 그 밖의 종은 chewie_create_training_file 로 직접 만들어야 한다.",
+            json!({}),
+            &[],
+        ),
+        tool(
             "chewie_module_help",
             "모듈의 인자·전제조건·주의사항을 읽는다. 어떤 모듈을 쓸지 고를 때, 그리고 실행 도구를 처음 부르기 전에 확인한다. module 을 생략하면 여덟 모듈의 요약을 돌려준다.",
             json!({ "module": { "type": "string", "enum": module_names() } }),
@@ -104,6 +110,16 @@ pub fn list(allow_run: bool) -> Vec<Value> {
             "완료된 평가 작업(SchemaEvaluator·AlleleCallEvaluator)의 HTML 리포트를 사용자의 기본 브라우저로 연다. 사용자 화면에 창이 뜨므로 요청받았을 때만 부른다.",
             json!({ "jobId": { "type": "string" } }),
             &["jobId"],
+        ));
+        tools.push(tool(
+            "chewie_create_training_file",
+            "게놈 폴더에서 가장 완성도 높은 어셈블리 하나를 골라 Prodigal training file(.trn)을 만들고 앱 저장소에 넣는다. 결과의 path 를 CreateSchema·PrepExternalSchema 의 ptf 에 그대로 넣으면 된다. 수십 초 걸리는 동기 호출이며, 같은 이름이 이미 있으면 덮어쓰지 않고 실패한다.",
+            json!({
+                "name": { "type": "string", "description": "만들 training file 의 이름. 확장자는 붙이지 않는다 (예: B_fragilis)" },
+                "genomeDir": { "type": "string", "description": "그 종의 게놈 FASTA 가 든 폴더 (Windows 절대 경로). 앱이 이 안에서 contig 가 가장 적은 것을 고른다" },
+                "genomeFile": { "type": "string", "description": "학습에 쓸 게놈을 직접 지정할 때만 (선택). 생략하면 앱이 고른다" },
+            }),
+            &["name", "genomeDir"],
         ));
     }
 
@@ -144,6 +160,7 @@ pub fn call(
         "chewie_job_log" => return job_log(state, args),
         "chewie_inspect" => return inspect(args),
         "chewie_module_help" => return module_help(args),
+        "chewie_list_training_files" => return list_training_files(state),
         _ => {}
     }
 
@@ -157,6 +174,7 @@ pub fn call(
     match name {
         "chewie_cancel" => cancel(state, args),
         "chewie_open_report" => open_report(app, state, args),
+        "chewie_create_training_file" => create_training_file(state, args),
         _ => match module_for_tool(name) {
             Some(module) => submit(state, module, args),
             None => Err(format!("알 수 없는 도구입니다: {name}")),
@@ -285,6 +303,17 @@ fn inspect(args: &Value) -> ToolResult {
     }))
 }
 
+fn list_training_files(state: &AppState) -> ToolResult {
+    let files = api::training_list(state).map_err(|e| e.to_string())?;
+    if files.is_empty() {
+        return Ok(
+            "저장소에 training file 이 없습니다. chewie_create_training_file 로 만들거나, 사용자가 가진 .trn 절대 경로를 ptf 에 직접 넣으세요."
+                .into(),
+        );
+    }
+    ok_json(&json!(files))
+}
+
 fn module_help(args: &Value) -> ToolResult {
     match args.get("module").and_then(Value::as_str) {
         None => Ok(docs::render_all()),
@@ -386,6 +415,37 @@ fn open_report(app: &AppHandle, state: &AppState, args: &Value) -> ToolResult {
     Ok(format!("사용자의 기본 브라우저로 리포트를 열었습니다: {path}"))
 }
 
+/// **작업으로 만들지 않은 유일한 실행 도구다.** 수십 초면 끝나므로 jobId 를
+/// 돌려주고 폴링하게 하는 것보다 결과를 그대로 돌려주는 편이 낫다.
+/// MCP 서버는 요청마다 스레드를 쓰므로(`http.rs`) 여기서 막혀도 다른 호출은 돈다.
+fn create_training_file(state: &AppState, args: &Value) -> ToolResult {
+    let name = str_arg(args, "name")?.to_string();
+    let genome_dir = str_arg(args, "genomeDir")?.to_string();
+    let genome_file = args
+        .get("genomeFile")
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty());
+
+    let created = api::training_create(
+        state,
+        &name,
+        std::path::Path::new(&genome_dir),
+        genome_file.map(std::path::Path::new),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(format!(
+        "training file 을 만들었습니다.\n\
+         이름: {}\n\
+         경로: {}\n\
+         {}\n\n\
+         이 경로를 chewie_create_schema 또는 chewie_prep_external_schema 의 ptf 에 넣으세요. \
+         한번 스키마를 만들면 이후 AlleleCall 은 스키마에 보관된 같은 파일을 자동으로 씁니다 — \
+         도중에 바꾸면 CDS 경계가 어긋나 불필요한 신규 allele 이 생깁니다.",
+        created.file.name, created.file.path, created.reason
+    ))
+}
+
 // ---------------------------------------------------------------- 인자 → JobSpec
 
 /// 도구 인자를 `JobSpec` JSON 으로 바꿔 serde 에 그대로 넘긴다.
@@ -473,7 +533,7 @@ fn params_schema(module: Module) -> Value {
             "properties": {
                 "inputDir": { "type": "string", "description": "어셈블리 FASTA 폴더 (Windows 절대 경로)" },
                 "schemaName": { "type": "string", "description": "만들 스키마의 표시 이름" },
-                "ptf": { "type": "string", "description": "Prodigal training file 경로 (선택)" },
+                "ptf": { "type": "string", "description": "Prodigal training file 경로 (선택). chewie_list_training_files 의 path 를 넣거나 사용자가 준 .trn 절대 경로. 비우면 게놈마다 따로 학습해 CDS 경계가 조금씩 달라진다" },
                 "cdsInput": { "type": "boolean", "description": "입력이 이미 CDS 면 true (--cds)" },
                 "outputDir": { "type": "string", "description": "생략 가능 — 산출물은 앱 저장소로 간다" },
                 "cpu": cpu, "waitSeconds": wait,
@@ -504,7 +564,7 @@ fn params_schema(module: Module) -> Value {
             "properties": {
                 "schemaDir": { "type": "string", "description": "loci FASTA 가 든 외부 스키마 폴더" },
                 "schemaName": { "type": "string", "description": "앱에 등록할 표시 이름" },
-                "ptf": { "type": "string", "description": "Prodigal training file 경로 (선택)" },
+                "ptf": { "type": "string", "description": "Prodigal training file 경로 (선택). chewie_list_training_files 의 path 를 넣거나 사용자가 준 .trn 절대 경로. 비우면 게놈마다 따로 학습해 CDS 경계가 조금씩 달라진다" },
                 "outputDir": { "type": "string", "description": "생략 가능 — 산출물은 앱 저장소로 간다" },
                 "cpu": cpu, "waitSeconds": wait,
             },
@@ -648,11 +708,55 @@ mod tests {
         for t in &read_only {
             let name = t["name"].as_str().unwrap();
             assert!(
-                module_for_tool(name).is_none() && name != "chewie_cancel",
+                module_for_tool(name).is_none()
+                    && name != "chewie_cancel"
+                    && name != "chewie_create_training_file",
                 "읽기 전용인데 실행 도구가 남아 있다: {name}"
             );
         }
-        assert_eq!(list(true).len(), read_only.len() + 10);
+        // 여덟 모듈 + cancel + open_report + create_training_file.
+        assert_eq!(list(true).len(), read_only.len() + 11);
+    }
+
+    /// 실행 도구는 전부 `call()` 이 실제로 받아야 한다.
+    ///
+    /// 두 번째 `match` 의 폴백이 `module_for_tool` 이라, 새 도구를 목록에만 넣고
+    /// arm 을 빠뜨리면 **목록에는 보이는데 부르면 "알 수 없는 도구"** 가 된다.
+    #[test]
+    fn every_listed_run_tool_has_a_dispatch_arm() {
+        for t in list(true) {
+            let name = t["name"].as_str().unwrap();
+            let known = module_for_tool(name).is_some()
+                || matches!(
+                    name,
+                    "chewie_status"
+                        | "chewie_list_schemas"
+                        | "chewie_list_jobs"
+                        | "chewie_get_job"
+                        | "chewie_job_log"
+                        | "chewie_inspect"
+                        | "chewie_module_help"
+                        | "chewie_list_training_files"
+                        | "chewie_cancel"
+                        | "chewie_open_report"
+                        | "chewie_create_training_file"
+                );
+            assert!(known, "call() 이 처리하지 않는 도구가 목록에 있다: {name}");
+        }
+    }
+
+    #[test]
+    fn the_training_file_tool_requires_a_name_and_a_genome_dir() {
+        let tool = list(true)
+            .into_iter()
+            .find(|t| t["name"] == "chewie_create_training_file")
+            .expect("실행 허용 시 목록에 있어야 한다");
+        let required = tool["inputSchema"]["required"].as_array().unwrap();
+        assert!(required.iter().any(|v| v == "name"));
+        assert!(required.iter().any(|v| v == "genomeDir"));
+        // genomeFile 은 선택이다 — 생략하면 앱이 고르는 것이 이 도구의 요점이다.
+        assert!(!required.iter().any(|v| v == "genomeFile"));
+        assert!(tool["inputSchema"]["properties"]["genomeFile"].is_object());
     }
 
     #[test]

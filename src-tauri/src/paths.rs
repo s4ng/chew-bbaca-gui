@@ -5,6 +5,7 @@
 //! ├── wsl\ext4.vhdx      # chewie-env 배포판 실체
 //! ├── app.db             # SQLite
 //! ├── logs\{job_id}.log  # 작업 로그 (DB 에는 경로만)
+//! ├── training\*.trn     # Prodigal training file 저장소
 //! └── cache\rootfs-*.tar.gz
 //! ```
 //!
@@ -23,6 +24,9 @@ pub struct AppPaths {
     pub cache: PathBuf,
     /// `wsl --import` 대상 디렉터리 (ext4.vhdx 가 여기 생성된다)
     pub wsl: PathBuf,
+    /// Prodigal training file 저장소. 스키마와 달리 **Windows 쪽**에 둔다 —
+    /// 파일 하나뿐이라 9p 비용이 없고, 사용자가 백업하거나 옮길 수 있어야 한다.
+    pub training: PathBuf,
 }
 
 impl AppPaths {
@@ -34,13 +38,20 @@ impl AppPaths {
             logs: root.join("logs"),
             cache: root.join("cache"),
             wsl: root.join("wsl"),
+            training: root.join("training"),
             root,
         })
     }
 
     /// 앱 시작 시 한 번 호출한다. 이미 존재하면 아무 일도 하지 않는다.
     pub fn ensure_dirs(&self) -> Result<()> {
-        for dir in [&self.root, &self.logs, &self.cache, &self.wsl] {
+        for dir in [
+            &self.root,
+            &self.logs,
+            &self.cache,
+            &self.wsl,
+            &self.training,
+        ] {
             std::fs::create_dir_all(dir)?;
         }
         Ok(())

@@ -22,6 +22,7 @@ use crate::paths::AppPaths;
 use crate::runner::BackendStatus;
 use crate::schema_store::SchemaStore;
 use crate::settings::{McpSettings, Settings};
+use crate::training_store::{TrainingCreated, TrainingFile, TrainingStore};
 
 /// 온보딩 ③ 단계 진행 상황. 다운로드 진행률과 단계 전환을 함께 싣는다.
 pub const EVENT_PROVISION: &str = "env://provision";
@@ -50,6 +51,13 @@ impl AppState {
 
     pub(crate) fn schemas(&self) -> SchemaStore {
         SchemaStore::new(Arc::clone(&self.db), Arc::clone(self.manager.runner()))
+    }
+
+    pub(crate) fn training(&self) -> TrainingStore {
+        TrainingStore::new(
+            self.paths.training.clone(),
+            Arc::clone(self.manager.runner()),
+        )
     }
 }
 
@@ -353,6 +361,44 @@ pub fn schemas_export(
     let dest_path = PathBuf::from(&dest);
     state.schemas().export(&schema_id, &dest_path)?;
     Ok(dest)
+}
+
+// ================================================================ training file
+
+#[tauri::command]
+pub fn training_list(state: State<'_, AppState>) -> Result<Vec<TrainingFile>> {
+    api::training_list(state.inner())
+}
+
+/// 게놈 폴더를 훑어 학습 후보를 추린다. 파일을 만들지 않으므로 폼이 자유롭게 부른다.
+///
+/// 폴더의 FASTA 를 **전부 읽는다** — contig 수는 파일 크기로 알 수 없다. 게놈
+/// 수백 개면 수 초가 걸리므로 UI 는 진행 표시를 띄워야 한다.
+#[tauri::command]
+pub fn training_scan(state: State<'_, AppState>, path: String) -> Result<crate::fasta::GenomeScan> {
+    api::training_scan(state.inner(), Path::new(&path))
+}
+
+/// 게놈 하나를 골라 학습시키고 저장소에 넣는다. 수십 초 걸린다.
+#[tauri::command]
+pub fn training_create(
+    state: State<'_, AppState>,
+    name: String,
+    genome_dir: String,
+    genome_file: Option<String>,
+) -> Result<TrainingCreated> {
+    api::training_create(
+        state.inner(),
+        &name,
+        Path::new(&genome_dir),
+        genome_file.as_deref().map(Path::new),
+    )
+}
+
+/// 되돌릴 수 없다. UI 에서 확인을 받은 뒤 호출한다.
+#[tauri::command]
+pub fn training_delete(state: State<'_, AppState>, name: String) -> Result<()> {
+    api::training_delete(state.inner(), &name)
 }
 
 // ================================================================ 설정

@@ -15,6 +15,7 @@ mod commands;
 mod db;
 mod env;
 mod error;
+mod fasta;
 mod jobs;
 mod mcp;
 mod models;
@@ -22,6 +23,7 @@ mod paths;
 mod runner;
 mod schema_store;
 mod settings;
+mod training_store;
 mod util;
 mod win;
 
@@ -105,6 +107,10 @@ pub fn run() {
             commands::schemas_delete,
             commands::schemas_import,
             commands::schemas_export,
+            commands::training_list,
+            commands::training_scan,
+            commands::training_create,
+            commands::training_delete,
             commands::settings_get,
             commands::settings_set,
             commands::inspect_input_dir,
