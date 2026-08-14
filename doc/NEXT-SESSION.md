@@ -17,7 +17,7 @@
 | 프론트 타입 | `npm run typecheck` | 통과 |
 | 프론트 번들 | `npx vite build` | 통과 (171KB / gzip 56KB) |
 | Rust 빌드 | `cargo build --manifest-path src-tauri/Cargo.toml` | 통과 (경고 7, 전부 dead-code) |
-| Rust 테스트 | `cargo test --manifest-path src-tauri/Cargo.toml` | **30/30 통과** |
+| Rust 테스트 | `cargo test --manifest-path src-tauri/Cargo.toml` | **101/101 통과** (v0.4.0) |
 | 앱 기동 | `npm run tauri:dev` | 창 생성 확인 (`MainWindowTitle: chewBBACA Desktop`) |
 | DB 초기화 | — | `%LOCALAPPDATA%\ChewieApp\app.db` 에 `jobs`/`schemas`/`settings` 생성 확인 (WAL) |
 | rootfs 빌드 | `./rootfs/build.sh 3.5.4` | `dist-rootfs/` 에 503MB tar.gz + sha256 (2026-08-10) |
@@ -39,6 +39,7 @@
 | **MCP 실제 실행** | `chewie_create_schema` (게놈 32개) | **49초에 completed**, loci 3,130 스키마 등록 (2026-08-12) |
 | **ChatGPT Desktop 실접속** | 앱에서 등록 → Work 모드 대화 | **정상 동작.** 요청 24건 거절 0건 (2026-08-12) |
 | MCP 규격 적합성 | `@modelcontextprotocol/inspector --cli` | 도구 17개 목록 + `tools/call` 실행 확인 |
+| **pyrodigal 학습 배관** | 합성 게놈으로 `pyrodigal -p single -t` 직접 실행 | `.trn` **558KB** 생성. `-t` 재사용 함정 실측 (2026-08-14) |
 
 > 완주는 **합성 CDS 입력**(게놈 4개 × 유전자 20개, `--cds` 로 Prodigal 우회)으로 했다.
 > 단계 이름과 순서를 얻는 데는 충분하지만, 단계별 **비중**은 실제 어셈블리로 다시 봐야 한다.
@@ -56,6 +57,21 @@
 
 **MCP 서버(v0.3.0)에서 하나가 남았다 — ChatGPT Desktop 으로 실제 접속.** 프로토콜은
 curl 로만 확인했다. 자세한 것은 [`MCP.md`](MCP.md) §9~§10.
+
+> ### ⚠ v0.4.0 training file 기능 — 실물 검증이 남아 있다
+>
+> 배관(pyrodigal 호출·`.trn` 생성·`-t` 재사용 함정)은 **합성 게놈으로** 확인했다.
+> 확인하지 **않은** 것 셋:
+>
+> 1. **실제 폴더에서 선별이 납득할 만한가.** `fasta.rs` 의 3단계 판정(100kb 미만 제거 →
+>    중앙값 ±20% → contig 최소)은 단위 테스트로만 검증됐다. 실측 데이터가 바로 옆에 있다 —
+>    `C:\Users\zalcl\chewBBACA_tutorial\...\complete_genomes\` 의 *S. agalactiae* 32개.
+> 2. **32개(또는 수백 개)를 훑는 데 걸리는 시간.** 폴더의 FASTA 를 **전부 읽는다**
+>    (contig 수는 파일 크기로 알 수 없다). UI 는 그동안 "훑는 중…" 만 띄운다.
+> 3. **만든 `.trn` 으로 CreateSchema 가 완주하는가.** 이게 통과해야 기능이 의미를 갖는다.
+>
+> 다음 세션의 첫 작업으로 권한다. 셋 다 앱에서 클릭 몇 번이면 끝난다
+> ([새 작업] → CreateSchema → training file 칸 → [폴더에서 만들기]).
 
 **여덟 모듈 모두 앱을 거쳐 완주했다** (2026-08-11). 남은 것은 셋뿐이다.
 
@@ -358,7 +374,17 @@ UI 노출·실행 검증·진행률 교정·[리포트 열기]까지 끝냈다. 
 - **`src/lib/types.ts` 와 Rust serde 표현은 수동 동기화다.** 어긋나면 런타임에
   `undefined` 로 조용히 흐른다. Rust 구조체를 고치면 반드시 같이 고친다.
 - 개발 빌드 바이너리(`target/debug/chewie-app.exe`)를 단독 실행하면 빈 창이 뜬다.
-  `devUrl`(localhost:1420)을 보기 때문이다. 항상 `npm run tauri:dev` 로 띄운다.
+  `devUrl`(localhost:5173)을 보기 때문이다. 항상 `npm run tauri:dev` 로 띄운다.
+- **`vite dev` 가 `EACCES ::1:<포트>` 로 죽으면 코드 문제가 아니다.** Windows 의
+  Hyper-V/WSL2 가 부팅할 때마다 포트 대역을 동적으로 예약하는데, 개발 포트가 거기
+  걸리면 점유가 아니라 **권한 거부**로 실패한다 — 포트를 쓰는 프로세스를 찾아도 없다.
+  `netsh interface ipv4 show excludedportrange protocol=tcp` 로 확인한다.
+  Tauri 기본값 1420 에서 5173 으로 옮긴 것이 이 때문이다(2026-08-14). 5173 도 언젠가
+  같은 대역에 걸릴 수 있으므로, 반복되면 관리자 권한으로 영구 예약하는 편이 낫다:
+  `net stop winnat` → `netsh int ipv4 add excludedportrange protocol=tcp startport=5173
+  numberofports=1 store=persistent` → `net start winnat`.
+  **포트를 바꿀 때는 `vite.config.ts` 와 `src-tauri/tauri.conf.json` 의 `devUrl` 을
+  함께 고친다.** 한쪽만 고치면 Vite 는 정상 기동하고 앱만 빈 화면을 띄운다.
 
 ---
 
