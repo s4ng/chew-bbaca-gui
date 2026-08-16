@@ -100,18 +100,30 @@ pub fn probe(distro: &str) -> Result<EnvReport> {
     report.manufacturer = facts.manufacturer;
     report.model = facts.model;
 
-    if report.hypervisor_present == Some(false) {
-        report
-            .messages
-            .push("HypervisorPresent = False — 가상화가 동작하지 않습니다".into());
-        if report.virtualization_firmware_enabled == Some(false) {
+    let verdict = hardware_verdict(
+        report.hypervisor_present,
+        report.virtualization_firmware_enabled,
+    );
+    match verdict {
+        HardwareVerdict::Blocked => {
+            report
+                .messages
+                .push("HypervisorPresent = False — 하이퍼바이저가 동작하지 않습니다".into());
             report.messages.push(
-                "VirtualizationFirmwareEnabled = False — 펌웨어에서 꺼져 있을 가능성이 큽니다"
+                "VirtualizationFirmwareEnabled 가 True 가 아닙니다 — 펌웨어에서 꺼져 있을 가능성이 큽니다"
+                    .into(),
+            );
+            report.gate = Gate::BiosVirtualization;
+            return Ok(report);
+        }
+        HardwareVerdict::Pending => {
+            report.messages.push(
+                "HypervisorPresent = False 이지만 펌웨어 가상화는 켜져 있습니다 — \
+                 WSL 설치 전이라 하이퍼바이저가 아직 기동하지 않은 상태로 봅니다"
                     .into(),
             );
         }
-        report.gate = Gate::BiosVirtualization;
-        return Ok(report);
+        HardwareVerdict::Ok => {}
     }
 
     // ── ② WSL 게이트 ──────────────────────────────────────────────
@@ -123,6 +135,19 @@ pub fn probe(distro: &str) -> Result<EnvReport> {
             .messages
             .push("WSL 이 설치되어 있지 않거나 기동하지 않습니다".into());
         report.gate = Gate::WslMissing;
+        return Ok(report);
+    }
+
+    // WSL 이 이미 있는데도 하이퍼바이저가 없다면 "아직 기동 전" 이라는 해명이 사라진다.
+    // 여기서부터는 진짜 가상화 문제이므로 하드웨어 게이트로 되돌린다 — 이대로 ③ 으로
+    // 보내면 `wsl --import` 가 0x80370102 로 죽고 사용자는 원인을 알 수 없다.
+    if verdict == HardwareVerdict::Pending {
+        report.messages.push(
+            "WSL 은 설치되어 있는데 하이퍼바이저가 여전히 동작하지 않습니다 — \
+             Windows 기능(Virtual Machine Platform)이나 부팅 설정을 확인해야 합니다"
+                .into(),
+        );
+        report.gate = Gate::BiosVirtualization;
         return Ok(report);
     }
 
@@ -138,6 +163,46 @@ pub fn probe(distro: &str) -> Result<EnvReport> {
     ));
     report.gate = Gate::DistroMissing;
     Ok(report)
+}
+
+/// 게이트 ① 의 판정 결과.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HardwareVerdict {
+    /// 하이퍼바이저가 돌고 있다(또는 조회 실패). 다음 게이트로.
+    Ok,
+    /// 하이퍼바이저는 없지만 펌웨어 가상화는 켜져 있다 — 판정을 미룬다.
+    Pending,
+    /// 펌웨어에서 꺼져 있을 가능성이 크다. BIOS 안내로.
+    Blocked,
+}
+
+/// 게이트 ① 을 시스템 호출 없이 판정한다.
+///
+/// `HypervisorPresent == false` 의 원인은 두 가지이고 처방이 완전히 다르다.
+///
+/// - 펌웨어에서 VT-x/SVM 이 꺼져 있다 → BIOS 를 켜야 한다
+/// - Virtual Machine Platform 이 없어 하이퍼바이저가 애초에 기동하지 않았다 → WSL 설치면 된다
+///
+/// 후자는 WSL 을 한 번도 깔지 않은 기기의 **정상 상태**다. `HypervisorPresent` 만 보고
+/// 막으면 BIOS 를 이미 켠 사용자가 [다시 검사] 를 아무리 눌러도 통과하지 못한다
+/// (실제 신고: LG gram, 펌웨어 True / 하이퍼바이저 False / WSL 미설치).
+/// 그래서 펌웨어가 `True` 면 판정을 게이트 ② 이후로 미룬다.
+///
+/// 반대로 `VirtualizationFirmwareEnabled` 를 **단독**으로 믿어서도 안 된다 —
+/// 하이퍼바이저가 이미 돌고 있으면 `False` 를 돌려주므로, 이 값은 여기서처럼
+/// `HypervisorPresent == false` 인 경우에 한해 본다.
+fn hardware_verdict(
+    hypervisor_present: Option<bool>,
+    firmware_enabled: Option<bool>,
+) -> HardwareVerdict {
+    if hypervisor_present != Some(false) {
+        return HardwareVerdict::Ok;
+    }
+    if firmware_enabled == Some(true) {
+        HardwareVerdict::Pending
+    } else {
+        HardwareVerdict::Blocked
+    }
 }
 
 /// 낙관적 시도. `Ok(false)` 는 "wsl 은 있는데 배포판이 없다" 는 뜻이다.
@@ -240,6 +305,9 @@ pub fn firmware_hint(manufacturer: Option<&str>) -> (&'static str, &'static str)
         )
     } else if m.contains("samsung") {
         ("F2", "Advanced → Virtualization Technology")
+    } else if m.contains("lg electronics") || m == "lg" {
+        // gram 계열은 부팅 로고에서 F2. 항목이 Advanced 안에 숨어 있는 기종이 있다.
+        ("F2", "Advanced → Intel Virtualization Technology (VT-x)")
     } else if m.contains("acer") {
         ("F2", "Main 또는 Advanced → Virtualization Technology")
     } else {
@@ -254,10 +322,56 @@ pub fn firmware_hint(manufacturer: Option<&str>) -> (&'static str, &'static str)
 mod tests {
     use super::*;
 
+    /// 하이퍼바이저가 돌고 있으면 펌웨어 값이 무엇이든 통과한다 — `False` 로
+    /// 보고되는 것이 이 상황의 정상이다.
+    #[test]
+    fn running_hypervisor_passes_regardless_of_firmware_flag() {
+        assert_eq!(
+            hardware_verdict(Some(true), Some(false)),
+            HardwareVerdict::Ok
+        );
+        assert_eq!(hardware_verdict(Some(true), None), HardwareVerdict::Ok);
+    }
+
+    /// 신고 사례: BIOS 에서 VT-x 를 켰는데 앱이 계속 BIOS 화면을 보여줬다.
+    /// 펌웨어가 켜져 있으면 여기서 막지 않는다.
+    #[test]
+    fn firmware_on_but_hypervisor_down_is_pending_not_blocked() {
+        assert_eq!(
+            hardware_verdict(Some(false), Some(true)),
+            HardwareVerdict::Pending
+        );
+    }
+
+    #[test]
+    fn firmware_off_or_unknown_blocks_at_bios_gate() {
+        assert_eq!(
+            hardware_verdict(Some(false), Some(false)),
+            HardwareVerdict::Blocked
+        );
+        assert_eq!(
+            hardware_verdict(Some(false), None),
+            HardwareVerdict::Blocked
+        );
+    }
+
+    /// CIM 조회 자체가 실패했을 때 하드웨어 게이트에서 막으면 안 된다 —
+    /// 판정 근거가 없는 것이지 가상화가 꺼진 것이 아니다.
+    #[test]
+    fn unknown_hypervisor_falls_through() {
+        assert_eq!(hardware_verdict(None, None), HardwareVerdict::Ok);
+    }
+
     #[test]
     fn firmware_hint_falls_back_for_unknown_vendor() {
         let (key, _) = firmware_hint(Some("Some OEM"));
         assert!(key.contains("F2"));
+    }
+
+    #[test]
+    fn firmware_hint_knows_lg() {
+        let (_, path) = firmware_hint(Some("LG Electronics"));
+        assert!(path.contains("Advanced"));
     }
 
     #[test]

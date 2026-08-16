@@ -109,6 +109,13 @@ wsl -d chewie-env -- true
 `VirtualizationFirmwareEnabled` 를 단독 판정에 쓰지 마라. 하이퍼바이저가 이미 실행 중이면
 `False` 를 돌려주어 정상 기기를 오진한다. `HypervisorPresent == false` 일 때만 보조로 본다.
 
+**반대 방향도 마찬가지다 — `HypervisorPresent == false` 하나로 게이트 ①을 막지 마라.**
+Virtual Machine Platform 이 없는 기기는 BIOS 에서 VT-x 가 켜져 있어도 하이퍼바이저가
+기동조차 하지 않아 `False` 다. WSL 을 한 번도 깔지 않은 기기의 정상 상태이고, 여기서
+막으면 BIOS 를 이미 켠 사용자가 [다시 검사] 를 눌러도 영영 통과하지 못한다. 펌웨어가
+`True` 면 판정을 보류하고 ②로 내려간 뒤, **WSL 이 이미 설치됐는데도 하이퍼바이저가
+없을 때** 실패로 확정한다 (`probe.rs::hardware_verdict`, 테스트가 세 경우를 다 잡는다).
+
 ### 7. 작업은 앱보다 오래 산다
 
 상태를 구조체 필드가 아니라 SQLite 에 둔다. 앱을 닫아도 WSL 안의 작업은 계속 돌고,

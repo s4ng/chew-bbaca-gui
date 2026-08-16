@@ -372,8 +372,10 @@ wsl -d chewie-env -- true                    ◀── 낙관적 시도
   ① 하드웨어 게이트   HypervisorPresent
        │
        ├─ false ─▶ VirtualizationFirmwareEnabled 보조 확인
-       │           └─▶ BIOS 가상화 안내 (§7.6) ─▶ 중단
-       │               ※ 이 시점까지 기능 활성화·재부팅을 하지 않았다
+       │           ├─ true 아님 ─▶ BIOS 가상화 안내 (§7.6) ─▶ 중단
+       │           │               ※ 이 시점까지 기능 활성화·재부팅을 하지 않았다
+       │           └─ true ─────▶ 판정 보류. 게이트 ② 로 내려간다
+       │                           (VMP 미설치라 하이퍼바이저가 아직 없는 정상 상태)
        │
        └─ true
             │
@@ -382,7 +384,7 @@ wsl -d chewie-env -- true                    ◀── 낙관적 시도
             │
             ├─ 미설치 / WSL1 ─▶ WSL 설치 (§7.5) ─▶ 재부팅 ─▶ [앱 시작]으로 복귀
             │
-            └─ 정상
+            └─ 정상 ─▶ ①이 보류였다면 여기서 확정 실패 ─▶ BIOS/Windows 기능 안내로 복귀
                  │
                  ▼
   ③ 배포판 게이트     rootfs 확보(동봉본) → SHA256 검증 → wsl --import
@@ -407,6 +409,14 @@ wsl -d chewie-env -- true                    ◀── 낙관적 시도
 > (호스트 OS 자신이 하이퍼바이저 위에서 동작하므로 펌웨어 상태를 조회할 수 없다).
 > 이 값만 보고 판정하면 **정상 동작하는 기기를 "가상화 꺼짐"으로 오진**한다.
 > 반드시 `HypervisorPresent == false`인 경우에 한해 보조 신호로만 참조한다.
+
+> **반대로 `HypervisorPresent == false`를 단독으로 실패 판정에 쓰지 않는다.**
+> Virtual Machine Platform이 설치되지 않은 기기에서는 BIOS에서 VT-x가 켜져 있어도
+> 하이퍼바이저가 애초에 기동하지 않아 `False`다 — WSL을 한 번도 깔지 않은 기기의
+> **정상 상태**다. 여기서 막으면 BIOS를 이미 켠 사용자가 [다시 검사]를 눌러도 영영
+> 통과하지 못한다. `VirtualizationFirmwareEnabled == true`이면 판정을 보류하고
+> 게이트 ②로 내려간 뒤, **WSL이 이미 설치되어 있는데도 하이퍼바이저가 없을 때**
+> 비로소 실패로 확정한다.
 
 ### 7.5 WSL 설치 — 권한 상승 헬퍼
 

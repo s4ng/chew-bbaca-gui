@@ -173,13 +173,44 @@ function BiosGate({ report }: { report: EnvReport }) {
     }
   };
 
+  // 펌웨어는 켜져 있는데 여기까지 왔다면 BIOS 는 이미 사용자가 해결한 것이다.
+  // 같은 화면에 "가상화를 켜세요" 라고 다시 쓰면 사용자는 할 일이 없어진다.
+  const firmwareOn = report.virtualizationFirmwareEnabled === true;
+
   return (
     <div className="card">
-      <h2>CPU 가상화가 꺼져 있습니다</h2>
-      <p>
-        Windows 11 이라고 해서 가상화가 켜져 있는 것은 아닙니다. 최소 요구사항(TPM 2.0,
-        Secure Boot)에 가상화는 포함되지 않습니다. 펌웨어(BIOS/UEFI)에서 켜야 합니다.
-      </p>
+      <h2>{firmwareOn ? "가상화가 동작하지 않습니다" : "CPU 가상화가 꺼져 있습니다"}</h2>
+      {firmwareOn ? (
+        <>
+          <p>
+            펌웨어(BIOS/UEFI)의 가상화는 <strong>켜져 있는 것으로 확인</strong>되는데
+            하이퍼바이저가 동작하지 않습니다. 남은 원인은 Windows 쪽입니다.
+          </p>
+          <ol style={{ color: "var(--text-dim)", lineHeight: 1.7 }}>
+            <li>
+              관리자 PowerShell 에서 <code>wsl --install --no-distribution</code> 을 실행하고
+              재부팅합니다. (Virtual Machine Platform 기능이 켜집니다.)
+            </li>
+            <li>
+              그래도 같다면 관리자 PowerShell 에서{" "}
+              <code>bcdedit /set hypervisorlaunchtype auto</code> 실행 후 재부팅합니다.
+              하이퍼바이저 기동이 꺼져 있는 경우입니다.
+            </li>
+            <li>
+              사내 보안 정책이나 다른 가상화 소프트웨어(VMware/VirtualBox 구버전)가 막고 있을
+              수도 있습니다.
+            </li>
+          </ol>
+          <p style={{ color: "var(--text-dim)" }}>
+            아래 펌웨어 안내는 위 방법이 모두 실패했을 때 확인용으로 남겨 둡니다.
+          </p>
+        </>
+      ) : (
+        <p>
+          Windows 11 이라고 해서 가상화가 켜져 있는 것은 아닙니다. 최소 요구사항(TPM 2.0,
+          Secure Boot)에 가상화는 포함되지 않습니다. 펌웨어(BIOS/UEFI)에서 켜야 합니다.
+        </p>
+      )}
 
       {error && <div className="banner error">{error}</div>}
 

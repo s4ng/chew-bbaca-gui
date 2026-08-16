@@ -314,6 +314,16 @@ UI 노출·실행 검증·진행률 교정·[리포트 열기]까지 끝냈다. 
 
 ## 4. 손대기 전에 알아야 할 함정
 
+- **`HypervisorPresent = False` 는 "BIOS 가 꺼져 있다" 가 아니다.** (2026-08-16 실사용자
+  신고, v0.4.1 에서 수정) Virtual Machine Platform 이 없는 기기는 BIOS 에서 VT-x 가
+  켜져 있어도 하이퍼바이저가 기동조차 하지 않아 `False` 다 — **WSL 을 한 번도 깔지 않은
+  기기의 정상 상태다.** 이 값 하나로 게이트 ①을 막으면 BIOS 를 이미 켠 사용자가
+  [다시 검사] 를 눌러도 영영 통과하지 못한다(신고 기기: LG gram 14ZD90P, 펌웨어 `True` /
+  하이퍼바이저 `False` / WSL 미설치). 판정은 `probe.rs::hardware_verdict()` 한 곳에
+  모여 있다 — 펌웨어가 `True` 면 보류하고 ②로 내려간 뒤, **WSL 이 이미 설치됐는데도**
+  하이퍼바이저가 없을 때 실패로 확정한다. `scripts/check-env.bat` 은 처음부터 이 세 갈래
+  (`PASS` / `PASS-PENDING` / `BIOS-SUSPECT`)로 되어 있었다. 둘이 어긋나면 스크립트 쪽이 맞다.
+
 - **모듈에 따라 `-o` 가 이미 있으면 거부한다.** (2026-08-11 에 실제로 물림)
   `Output directory already exists.` 한 줄과 exit 1 이 전부다 — 로그만 보면 왜
   아무 일도 안 일어났는지 알기 어렵다. 검사를 가진 모듈은 넷이다:
