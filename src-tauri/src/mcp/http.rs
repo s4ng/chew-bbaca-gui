@@ -68,7 +68,9 @@ fn handle(app: &AppHandle, mut request: Request) {
     let agent = find_header(&request, "user-agent").unwrap_or_else(|| "-".into());
     log_request(
         app,
-        &format!("{method} {path} auth={has_auth} accept=\"{accept}\" origin={origin} ua=\"{agent}\""),
+        &format!(
+            "{method} {path} auth={has_auth} accept=\"{accept}\" origin={origin} ua=\"{agent}\""
+        ),
     );
 
     // CORS 프리플라이트. 우리는 브라우저를 대상으로 하지 않지만, 거절하더라도
@@ -120,7 +122,8 @@ fn handle(app: &AppHandle, mut request: Request) {
             || origin.starts_with("https://localhost");
         if !ok {
             log_request(app, "  → 403 (허용되지 않은 Origin)");
-            let _ = request.respond(Response::from_string("forbidden origin").with_status_code(403));
+            let _ =
+                request.respond(Response::from_string("forbidden origin").with_status_code(403));
             return;
         }
     }
@@ -164,7 +167,11 @@ fn handle(app: &AppHandle, mut request: Request) {
         .read_to_string(&mut body)
         .is_err()
     {
-        let _ = respond_json(request, 400, &error_body(None, -32700, "본문을 읽을 수 없습니다"));
+        let _ = respond_json(
+            request,
+            400,
+            &error_body(None, -32700, "본문을 읽을 수 없습니다"),
+        );
         return;
     }
 
@@ -228,7 +235,10 @@ fn handle(app: &AppHandle, mut request: Request) {
 /// 메시지 하나를 처리한다. 알림이면 `None`.
 fn dispatch(app: &AppHandle, msg: &Value) -> Option<Value> {
     let id = msg.get("id").cloned();
-    let method = msg.get("method").and_then(Value::as_str).unwrap_or_default();
+    let method = msg
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
 
     // 알림은 처리하고 답하지 않는다.
@@ -384,8 +394,8 @@ fn resources_read(app: &AppHandle, params: &Value) -> std::result::Result<Value,
                     -32602,
                     "작업 리소스는 chewie://jobs/{jobId}/log 형태여야 합니다".to_string(),
                 ))?;
-                let log = api::jobs_log(state.inner(), job_id)
-                    .map_err(|e| (-32602, e.to_string()))?;
+                let log =
+                    api::jobs_log(state.inner(), job_id).map_err(|e| (-32602, e.to_string()))?;
                 ("text/plain", log)
             } else {
                 return Err((-32602, format!("알 수 없는 리소스입니다: {other}")));

@@ -174,12 +174,7 @@ impl WslRunner {
     ///
     /// 같은 이름의 파일이 섞이면 서로 덮어쓰므로 번호를 붙여 구분한다 —
     /// 여러 번 돌린 결과는 하나같이 `results_alleles.tsv` 다.
-    fn stage_files(
-        &self,
-        work: &str,
-        srcs: &[String],
-        sink: &EventSink,
-    ) -> Result<Vec<String>> {
+    fn stage_files(&self, work: &str, srcs: &[String], sink: &EventSink) -> Result<Vec<String>> {
         sink(RunEvent::Notice(format!(
             "입력 파일 {}개를 WSL 내부(ext4)로 복사하는 중...",
             srcs.len()
@@ -193,11 +188,7 @@ impl WslRunner {
         let mut staged = Vec::new();
         for (i, src) in srcs.iter().enumerate() {
             let dest = format!("{work}/input/{i}.tsv");
-            lines.push_str(&format!(
-                "cp -a {} {}\n",
-                sh_quote(src),
-                sh_quote(&dest)
-            ));
+            lines.push_str(&format!("cp -a {} {}\n", sh_quote(src), sh_quote(&dest)));
             staged.push(dest);
         }
         self.bash(&lines)?.require_success()?;
@@ -547,8 +538,7 @@ impl ChewieRunner for WslRunner {
                 if let Some(p) = ptf {
                     args.ptf = Some(self.to_backend_path(Path::new(p))?);
                 }
-                created_schema_target =
-                    Some((schema_id, schema_name_of(spec).to_string()));
+                created_schema_target = Some((schema_id, schema_name_of(spec).to_string()));
             }
         }
 

@@ -192,7 +192,10 @@ fn status(state: &AppState) -> ToolResult {
         .iter()
         .filter(|j| j.status == JobStatus::Running)
         .count();
-    let queued = jobs.iter().filter(|j| j.status == JobStatus::Queued).count();
+    let queued = jobs
+        .iter()
+        .filter(|j| j.status == JobStatus::Queued)
+        .count();
 
     ok_json(&json!({
         "ready": backend.ready,
@@ -267,8 +270,7 @@ fn inspect(args: &Value) -> ToolResult {
     let p = std::path::Path::new(&path);
 
     if p.is_dir() {
-        let info =
-            crate::commands::inspect_input_dir(path.clone()).map_err(|e| e.to_string())?;
+        let info = crate::commands::inspect_input_dir(path.clone()).map_err(|e| e.to_string())?;
         return ok_json(&json!({
             "kind": "directory",
             "totalFiles": info.total_files,
@@ -406,13 +408,17 @@ fn wait_for(state: &AppState, job_id: &str, seconds: u64) -> Option<crate::model
 fn cancel(state: &AppState, args: &Value) -> ToolResult {
     let id = str_arg(args, "jobId")?;
     api::jobs_cancel(state, id).map_err(|e| e.to_string())?;
-    Ok(format!("작업 {id} 에 중단을 요청했습니다. 프로세스 그룹이 정리될 때까지 몇 초 걸릴 수 있습니다."))
+    Ok(format!(
+        "작업 {id} 에 중단을 요청했습니다. 프로세스 그룹이 정리될 때까지 몇 초 걸릴 수 있습니다."
+    ))
 }
 
 fn open_report(app: &AppHandle, state: &AppState, args: &Value) -> ToolResult {
     let id = str_arg(args, "jobId")?;
     let path = api::report_open(app, state, id).map_err(|e| e.to_string())?;
-    Ok(format!("사용자의 기본 브라우저로 리포트를 열었습니다: {path}"))
+    Ok(format!(
+        "사용자의 기본 브라우저로 리포트를 열었습니다: {path}"
+    ))
 }
 
 /// **작업으로 만들지 않은 유일한 실행 도구다.** 수십 초면 끝나므로 jobId 를
@@ -454,7 +460,10 @@ fn create_training_file(state: &AppState, args: &Value) -> ToolResult {
 /// 열거형에 섞여 들어가면 해석이 어긋날 수 있고, 그때는 조용히 틀린다.
 fn build_spec(module: Module, args: &Value) -> std::result::Result<JobSpec, String> {
     let schema = params_schema(module);
-    let props = schema["properties"].as_object().cloned().unwrap_or_default();
+    let props = schema["properties"]
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
 
     let mut o = Map::new();
     for key in props.keys() {
@@ -479,11 +488,15 @@ fn build_spec(module: Module, args: &Value) -> std::result::Result<JobSpec, Stri
     );
     o.insert(
         "cpu".into(),
-        args.get("cpu").filter(|v| !v.is_null()).cloned().unwrap_or(Value::Null),
+        args.get("cpu")
+            .filter(|v| !v.is_null())
+            .cloned()
+            .unwrap_or(Value::Null),
     );
 
-    serde_json::from_value(Value::Object(o))
-        .map_err(|e| format!("인자를 해석할 수 없습니다: {e}\nchewie_module_help 로 필요한 인자를 확인하세요."))
+    serde_json::from_value(Value::Object(o)).map_err(|e| {
+        format!("인자를 해석할 수 없습니다: {e}\nchewie_module_help 로 필요한 인자를 확인하세요.")
+    })
 }
 
 pub fn tool_name(module: Module) -> &'static str {
@@ -639,10 +652,7 @@ mod tests {
         match spec["type"].as_str() {
             Some("boolean") => json!(false),
             Some("integer") => json!(4),
-            Some("array") => json!([
-                format!("C:/{name}/a.tsv"),
-                format!("C:/{name}/b.tsv")
-            ]),
+            Some("array") => json!([format!("C:/{name}/a.tsv"), format!("C:/{name}/b.tsv")]),
             _ => json!(format!("C:/{name}")),
         }
     }

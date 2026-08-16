@@ -608,7 +608,9 @@ mod tests {
         // 끝난 뒤 done. 을 붙인다). 그 직전 줄에서 이미 트리 구간에 들어가 있어야
         // 막대가 죽지 않는다.
         let mut p = ProgressParser::for_module(Module::AlleleCallEvaluator);
-        let (_, label) = p.observe("Results are available in /home/chewie/work/j1/output/temp").unwrap();
+        let (_, label) = p
+            .observe("Results are available in /home/chewie/work/j1/output/temp")
+            .unwrap();
         assert_eq!(label, "NJ 트리 계산 중");
         assert!(p.value() >= 0.60, "got {}", p.value());
     }
@@ -620,7 +622,9 @@ mod tests {
         let mut p = ProgressParser::for_module(Module::AlleleCallEvaluator);
         p.observe("Computing sample statistics...done.");
         let before = p.value();
-        assert!(p.observe("Results available in /home/chewie/work/j1/output.").is_none());
+        assert!(p
+            .observe("Results available in /home/chewie/work/j1/output.")
+            .is_none());
         assert_eq!(p.value(), before);
     }
 

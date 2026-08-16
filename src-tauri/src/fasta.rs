@@ -249,8 +249,11 @@ mod tests {
     #[test]
     fn rejects_a_folder_of_gene_fastas() {
         // 참조 게놈 대신 유전자 FASTA 폴더를 고르는 흔한 사고.
-        let err = rank(vec![stat("locus1.fasta", 1, 1_200), stat("locus2.fasta", 1, 900)])
-            .unwrap_err();
+        let err = rank(vec![
+            stat("locus1.fasta", 1, 1_200),
+            stat("locus2.fasta", 1, 900),
+        ])
+        .unwrap_err();
         assert!(err.to_string().contains("100kb"), "{err}");
     }
 
@@ -267,7 +270,10 @@ mod tests {
         .unwrap();
         assert_eq!(scan.candidates.len(), 1);
         assert_eq!(scan.candidates[0].file_name, "b.fna");
-        assert_eq!(scan.scanned, 3, "훑은 개수는 거른 뒤에도 원래 값이어야 한다");
+        assert_eq!(
+            scan.scanned, 3,
+            "훑은 개수는 거른 뒤에도 원래 값이어야 한다"
+        );
     }
 
     #[test]

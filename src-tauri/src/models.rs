@@ -457,6 +457,9 @@ mod tests {
         )
         .unwrap();
         let json = serde_json::to_value(&spec).unwrap();
-        assert_eq!(json["module"], serde_json::to_value(Module::CreateSchema).unwrap());
+        assert_eq!(
+            json["module"],
+            serde_json::to_value(Module::CreateSchema).unwrap()
+        );
     }
 }

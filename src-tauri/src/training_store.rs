@@ -218,9 +218,7 @@ fn safe_stem(name: &str) -> Result<String> {
         )));
     }
     if trimmed.contains("..") {
-        return Err(Error::InvalidInput(
-            "이름에 `..` 을 쓸 수 없습니다".into(),
-        ));
+        return Err(Error::InvalidInput("이름에 `..` 을 쓸 수 없습니다".into()));
     }
     if let Some(bad) = trimmed
         .chars()
