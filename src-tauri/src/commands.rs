@@ -3,6 +3,19 @@
 //! 규칙 하나만 지키면 된다 — **여기서 WSL 이라는 단어가 프런트로 넘어가지
 //! 않게 한다.** `env_*` 계열은 예외다. 온보딩은 본질적으로 Windows/WSL 절차라
 //! UI 가 그 사실을 알아야 하며, macOS 확장 시 통째로 교체될 화면들이다(§9).
+//!
+//! ## `#[tauri::command(async)]` 를 언제 붙이는가
+//!
+//! Tauri 는 `async` 표시가 없는 명령을 **메인 스레드(창 이벤트 루프)에서** 실행한다.
+//! 그래서 `wsl.exe` 를 한 번 부르는 것만으로도 창이 그동안 굳고, 스키마
+//! 내보내기/불러오기처럼 `cp -a` 로 loci FASTA 수천 개를 옮기는 명령은 몇 분씩
+//! "응답 없음" 이 된다(실측). `(async)` 를 붙이면 함수 자체는 동기인 채로 몸통만
+//! 워커 스레드에서 돌아 창이 계속 그려진다.
+//!
+//! **백엔드(WSL)를 부르거나 파일을 훑는 명령에는 예외 없이 붙인다.** DB 한 줄 읽기나
+//! 순수 계산처럼 즉시 끝나는 것만 동기로 둔다 — 스레드를 오가는 값이 오히려 비싸다.
+//! 오래 걸리면서 **진행 상황을 보여줘야 하는** 명령(`env_provision`)은 이것으로
+//! 부족하므로 직접 스레드를 띄우고 이벤트를 쏜다.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -116,13 +129,13 @@ pub struct DiskUsage {
 // ================================================================ 환경
 
 /// §7.3 의 게이트 판정. 부작용 없이 읽기만 한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn env_probe(state: State<'_, AppState>) -> Result<EnvReport> {
     api::env_probe(state.inner())
 }
 
 /// 백엔드(배포판 + chewBBACA) 상태. 게이트 통과 후 상세 확인용.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn backend_status(state: State<'_, AppState>) -> BackendStatus {
     api::backend_status(state.inner())
 }
@@ -131,7 +144,7 @@ pub fn backend_status(state: State<'_, AppState>) -> BackendStatus {
 ///
 /// UAC 가 거부되면 `elevation-denied` 로 돌아가므로, UI 는 그때
 /// `env_manual_commands()` 안내로 폴백해야 한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn env_install_wsl(state: State<'_, AppState>) -> Result<String> {
     let p = state.provisioner();
     let message = p.install_wsl()?;
@@ -268,7 +281,7 @@ pub fn env_provision(app: AppHandle, state: State<'_, AppState>) -> Result<()> {
 }
 
 /// 배포판 제거. 언인스톨이 한 줄로 끝나는 것이 전용 배포판을 쓰는 가장 큰 이유다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn env_unregister(state: State<'_, AppState>) -> Result<()> {
     state.provisioner().unregister()
 }
@@ -276,7 +289,7 @@ pub fn env_unregister(state: State<'_, AppState>) -> Result<()> {
 // ================================================================ 디스크
 
 /// `ext4.vhdx` 는 파일을 지워도 자동으로 줄지 않는다 (§6.5).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn disk_compact(state: State<'_, AppState>) -> Result<String> {
     state.provisioner().compact_disk()
 }
@@ -288,7 +301,7 @@ pub fn disk_usage(state: State<'_, AppState>) -> DiskUsage {
 
 // ================================================================ 작업
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jobs_submit(state: State<'_, AppState>, spec: JobSpec) -> Result<String> {
     api::jobs_submit(state.inner(), spec)
 }
@@ -303,20 +316,20 @@ pub fn jobs_get(state: State<'_, AppState>, job_id: String) -> Result<Option<Job
     api::jobs_get(state.inner(), &job_id)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jobs_cancel(state: State<'_, AppState>, job_id: String) -> Result<()> {
     api::jobs_cancel(state.inner(), &job_id)
 }
 
 /// 로그 파일 전체. UI 가 이벤트를 놓쳤거나 앱을 다시 켠 경우 이걸로 복원한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jobs_log(state: State<'_, AppState>, job_id: String) -> Result<String> {
     api::jobs_log(state.inner(), &job_id)
 }
 
 /// 앱 시작 시 조정 (§6.3). 살아 있는 작업 목록을 돌려주면 UI 가
 /// "이전 작업이 실행 중입니다 — 복구 / 종료" 를 띄운다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn jobs_reconcile(state: State<'_, AppState>) -> Result<Vec<Job>> {
     state.manager.reconcile()
 }
@@ -329,30 +342,34 @@ pub fn jobs_adopted(state: State<'_, AppState>) -> Result<Vec<Job>> {
 
 /// 평가 리포트 HTML 을 기본 브라우저로 연다. 실제 동작은 `api::report_open` 에 있다
 /// (MCP 도구도 같은 함수를 부른다).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn report_open(app: AppHandle, state: State<'_, AppState>, job_id: String) -> Result<String> {
     api::report_open(&app, state.inner(), &job_id)
 }
 
 // ================================================================ 스키마
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn schemas_list(state: State<'_, AppState>) -> Result<Vec<SchemaInfo>> {
     api::schemas_list(state.inner())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn schemas_delete(state: State<'_, AppState>, schema_id: String) -> Result<()> {
     state.schemas().delete(&schema_id)
 }
 
 /// 내보낸 스키마 폴더를 다시 들여온다. 되돌릴 수 있는 조작이라 확인을 받지 않는다.
-#[tauri::command]
+///
+/// loci FASTA 수천 개를 9p 경유로 복사하므로 스키마 크기에 따라 몇 분이 걸린다.
+/// `(async)` 가 빠지면 그동안 창이 통째로 굳는다.
+#[tauri::command(async)]
 pub fn schemas_import(state: State<'_, AppState>, dir: String, name: String) -> Result<SchemaInfo> {
     state.schemas().import(Path::new(&dir), &name)
 }
 
-#[tauri::command]
+/// 불러오기와 같은 이유로 오래 걸린다 — 위 주석 참고.
+#[tauri::command(async)]
 pub fn schemas_export(
     state: State<'_, AppState>,
     schema_id: String,
@@ -365,7 +382,7 @@ pub fn schemas_export(
 
 // ================================================================ training file
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn training_list(state: State<'_, AppState>) -> Result<Vec<TrainingFile>> {
     api::training_list(state.inner())
 }
@@ -374,13 +391,13 @@ pub fn training_list(state: State<'_, AppState>) -> Result<Vec<TrainingFile>> {
 ///
 /// 폴더의 FASTA 를 **전부 읽는다** — contig 수는 파일 크기로 알 수 없다. 게놈
 /// 수백 개면 수 초가 걸리므로 UI 는 진행 표시를 띄워야 한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn training_scan(state: State<'_, AppState>, path: String) -> Result<crate::fasta::GenomeScan> {
     api::training_scan(state.inner(), Path::new(&path))
 }
 
 /// 게놈 하나를 골라 학습시키고 저장소에 넣는다. 수십 초 걸린다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn training_create(
     state: State<'_, AppState>,
     name: String,
@@ -396,7 +413,7 @@ pub fn training_create(
 }
 
 /// 되돌릴 수 없다. UI 에서 확인을 받은 뒤 호출한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn training_delete(state: State<'_, AppState>, name: String) -> Result<()> {
     api::training_delete(state.inner(), &name)
 }
@@ -465,7 +482,7 @@ pub fn mcp_regenerate_token(app: AppHandle, state: State<'_, AppState>) -> Resul
 
 /// 경로가 실제로 존재하고 FASTA 로 보이는 파일이 몇 개인지 알려준다.
 /// 새 작업 폼이 "이 폴더에 61개 파일" 처럼 즉시 피드백하는 데 쓴다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn inspect_input_dir(path: String) -> Result<InputDirInfo> {
     let dir = Path::new(&path);
     crate::paths::validate_host_path(dir)?;
@@ -503,7 +520,7 @@ pub fn inspect_input_dir(path: String) -> Result<InputDirInfo> {
 /// **한 줄에 식별자 하나**이므로 탭이 들어 있으면 표로 보고 거른다.
 /// 정상이라면 몇 개를 대상으로 하게 되는지 알려준다 — 3,127 중 1,270 처럼
 /// 숫자가 보이면 사용자가 잘못 골랐는지 스스로 알아챈다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn inspect_loci_list(path: String) -> Result<LociListInfo> {
     use std::io::BufRead;
 
@@ -549,7 +566,7 @@ pub fn inspect_loci_list(path: String) -> Result<LociListInfo> {
 /// **여는 것까지 Rust 가 한다.** 프런트에서 `openPath` 를 부르면 열리지 않는다 —
 /// `opener:allow-open-path` 는 "스코프 없이 명령만 허용"이라 어떤 경로도 통과하지
 /// 못하기 때문이다. 우리가 방금 쓴 파일을 우리가 여는 것이므로 여기서 처리한다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
     // (파일명, 내용) — 스크린샷은 HTML 이 상대 경로로 참조하므로 같은 폴더에 푼다.
     const HTML: &str = include_str!("../guide/guide.html");
@@ -569,7 +586,7 @@ pub fn guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> 
 ///
 /// 따라해보기와 나누어 둔 이유는 읽는 시점이 다르기 때문이다 — 이쪽은 분석을 이미
 /// 할 줄 아는 사람이 "대화로 시키고 싶을 때" 한 번 보는 문서다.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn mcp_guide_open(app: AppHandle, state: State<'_, AppState>) -> Result<String> {
     const HTML: &str = include_str!("../guide/mcp.html");
     const SHOTS: [(&str, &[u8]); 4] = [
@@ -637,7 +654,7 @@ fn open_guide(
 /// 엉뚱한 것을 넣어도 chewBBACA 는 **거절하지 않고** 각 행을 균주로 취급해 한참을
 /// 돌다가 쓸모없는 결과를 낸다 (`cds_coordinates.tsv` 로 64,217 행을 도는 사례가 있었다).
 /// 그래서 제출 전에 여기서 거른다 — 40분 뒤에 알게 되는 일이 없어야 한다 (§5.4).
-#[tauri::command]
+#[tauri::command(async)]
 pub fn inspect_profiles_file(path: String) -> Result<ProfilesInfo> {
     use std::io::BufRead;
 

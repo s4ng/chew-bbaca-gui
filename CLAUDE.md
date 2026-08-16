@@ -143,6 +143,10 @@ wsl -d chewie-env -- true
 - `src/lib/types.ts` 는 Rust serde 표현과 1:1 이다. Rust 구조체를 고치면 **반드시 같이**
   고친다. 어긋나면 런타임에 `undefined` 로 조용히 흐른다.
 - 컴포넌트에서 `invoke()` 를 직접 부르지 않는다. `src/lib/ipc.ts` 만 통한다.
+- **백엔드를 부르는 `#[tauri::command]` 에는 `(async)` 를 붙인다.** 빠뜨리면 그 명령은
+  창 이벤트 루프에서 돌아 실행 내내 앱이 "응답 없음" 이 된다 — `wsl.exe` 한 번에도
+  체감되고, 스키마 내보내기/불러오기(`cp -a` 로 loci 수천 개)에서는 몇 분간 굳는다.
+  DB 한 줄 읽기나 순수 계산만 동기로 둔다.
 - rootfs 파일명은 **네 곳에 흩어져 있다** — `rootfs/build.sh`, `src-tauri/tauri.bundle.json`,
   `settings.rs` 의 `file_name`, 그리고 같은 파일의 `sha256`. 하나만 고치면 인스톨러는
   정상 생성되고 사용자 기기에서 "찾을 수 없음" 또는 체크섬 불일치로 처음 실행할 때 깨진다.

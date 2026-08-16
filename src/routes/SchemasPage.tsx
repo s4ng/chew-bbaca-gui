@@ -16,7 +16,9 @@ import { asAppError, type SchemaInfo, type TrainingFile } from "../lib/types";
 export default function SchemasPage() {
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  // 어느 스키마가 무엇을 하는 중인지. 내보내기는 loci 수천 개를 옮기느라 몇 분이
+  // 걸리므로 버튼이 그저 비활성인 것만으로는 진행 중인지 멈춘 건지 알 수 없다.
+  const [busy, setBusy] = useState<{ id: string; action: "export" | "delete" } | null>(null);
   const [importing, setImporting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -36,7 +38,7 @@ export default function SchemasPage() {
   const exportSchema = async (schema: SchemaInfo) => {
     const dest = await open({ directory: true, multiple: false });
     if (typeof dest !== "string") return;
-    setBusy(schema.schemaId);
+    setBusy({ id: schema.schemaId, action: "export" });
     try {
       const written = await schemasExport(schema.schemaId, dest);
       await revealItemInDir(written);
@@ -83,7 +85,7 @@ export default function SchemasPage() {
       `'${schema.name}' 스키마를 삭제합니다.\n이 스키마로 만든 기존 결과는 남지만, 같은 스키마로 이어서 AlleleCall 을 할 수 없게 됩니다.\n되돌릴 수 없습니다. 계속할까요?`,
     );
     if (!ok) return;
-    setBusy(schema.schemaId);
+    setBusy({ id: schema.schemaId, action: "delete" });
     try {
       await schemasDelete(schema.schemaId);
       await refresh();
@@ -132,15 +134,17 @@ export default function SchemasPage() {
                   <div className="path">{s.schemaId}</div>
                 </div>
                 <div className="row">
-                  <button disabled={busy === s.schemaId} onClick={() => void exportSchema(s)}>
-                    내보내기
+                  <button disabled={busy?.id === s.schemaId} onClick={() => void exportSchema(s)}>
+                    {busy?.id === s.schemaId && busy.action === "export"
+                      ? "내보내는 중..."
+                      : "내보내기"}
                   </button>
                   <button
                     className="danger"
-                    disabled={busy === s.schemaId}
+                    disabled={busy?.id === s.schemaId}
                     onClick={() => void remove(s)}
                   >
-                    삭제
+                    {busy?.id === s.schemaId && busy.action === "delete" ? "삭제 중..." : "삭제"}
                   </button>
                 </div>
               </div>
