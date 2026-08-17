@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { formatDuration, formatTime, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
+import { formatDuration, formatTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { jobsAdopted, jobsCancel, jobsList, jobsReconcile, onProgress, onState } from "../lib/ipc";
 import { asAppError, type Job } from "../lib/types";
 import JobDetail from "./JobDetail";
 
 export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
+  const t = useT();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -61,11 +63,11 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
     <>
       <div className="page-head">
         <div>
-          <h1>작업</h1>
-          <p>실행 이력과 진행 상황입니다. 동시에 하나씩 순서대로 실행됩니다.</p>
+          <h1>{t.jobs.title}</h1>
+          <p>{t.jobs.subtitle}</p>
         </div>
         <button className="primary" onClick={onNewJob}>
-          새 작업
+          {t.jobs.newJob}
         </button>
       </div>
 
@@ -74,12 +76,9 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
       {adopted.map((job) => (
         <div key={job.jobId} className="banner warn">
           <div className="row spread">
-            <span>
-              이전에 시작한 작업이 아직 실행 중입니다 — {MODULE_LABEL[job.module]} (
-              {formatTime(job.startedAt)} 시작)
-            </span>
+            <span>{t.jobs.adopted(t.module[job.module], formatTime(job.startedAt, t))}</span>
             <span className="row">
-              <button onClick={() => setSelected(job.jobId)}>복구</button>
+              <button onClick={() => setSelected(job.jobId)}>{t.jobs.recover}</button>
               <button
                 className="danger"
                 onClick={() => {
@@ -87,7 +86,7 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
                   void jobsCancel(job.jobId).then(() => void refresh());
                 }}
               >
-                종료
+                {t.jobs.terminate}
               </button>
             </span>
           </div>
@@ -96,9 +95,9 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
 
       {jobs.length === 0 ? (
         <div className="empty">
-          <p>아직 실행한 작업이 없습니다.</p>
+          <p>{t.jobs.empty}</p>
           <button className="primary" onClick={onNewJob}>
-            첫 작업 만들기
+            {t.jobs.createFirst}
           </button>
         </div>
       ) : (
@@ -108,10 +107,11 @@ export default function JobsPage({ onNewJob }: { onNewJob: () => void }) {
             const fraction = live?.fraction ?? job.progress ?? null;
             return (
               <button key={job.jobId} className="job-row" onClick={() => setSelected(job.jobId)}>
-                <strong>{MODULE_LABEL[job.module]}</strong>
-                <span className={`pill ${job.status}`}>{STATUS_LABEL[job.status]}</span>
+                <strong>{t.module[job.module]}</strong>
+                <span className={`pill ${job.status}`}>{t.status[job.status]}</span>
                 <span className="meta">
-                  {formatTime(job.createdAt)} · {formatDuration(job.startedAt, job.finishedAt)}
+                  {formatTime(job.createdAt, t)} ·{" "}
+                  {formatDuration(job.startedAt, job.finishedAt, t)}
                   {job.status === "running" && live ? ` · ${live.label}` : ""}
                 </span>
                 {job.status === "running" && (

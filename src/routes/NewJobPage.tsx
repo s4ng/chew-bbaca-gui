@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import TrainingFileField from "../components/TrainingFileField";
-import { MODULE_INFO, MODULE_STEP, STEP_LABEL } from "../lib/format";
+import { MODULE_STEP } from "../lib/format";
+import { useT } from "../lib/i18n";
 import {
   backendStatus,
   inspectInputDir,
@@ -39,21 +40,37 @@ type FormModule = Module;
 const NO_CPU: Module[] = ["ExtractCgMLST", "RemoveGenes", "JoinProfiles"];
 
 /**
+ * 모듈 선택 목록의 순서. 표준 파이프라인 순서로 두고 후처리·점검을 뒤에 붙인다 —
+ * 알파벳순이 아니라 **사용자가 실제로 밟는 순서**여야 목록이 안내 역할을 한다.
+ */
+const MODULE_ORDER: Module[] = [
+  "CreateSchema",
+  "AlleleCall",
+  "ExtractCgMLST",
+  "RemoveGenes",
+  "JoinProfiles",
+  "PrepExternalSchema",
+  "SchemaEvaluator",
+  "AlleleCallEvaluator",
+];
+
+/**
  * 고른 모듈이 무엇을 하는지, 그리고 파이프라인의 어디쯤인지 보여준다.
  *
  * 단계 번호를 붙이는 이유는 이 세 모듈이 **실제로 순서가 있는 절차**이기 때문이다.
  * 사용자가 가장 자주 막히는 곳은 개별 모듈의 사용법이 아니라 "이제 뭘 해야 하지" 다.
  */
 function ModuleGuide({ module }: { module: Module }) {
-  const info = MODULE_INFO[module];
+  const t = useT();
+  const info = t.moduleInfo[module];
   const step = MODULE_STEP[module];
 
   return (
     <div className="module-info">
-      <div className="steps" aria-label="일반적인 실행 순서">
+      <div className="steps" aria-label={t.newJob.pipelineLabel}>
         {PIPELINE_STEPS.map((n) => (
           <span key={n} className={`step ${n === step ? "on" : ""}`}>
-            {STEP_LABEL[n]}
+            {t.step[n]}
           </span>
         ))}
       </div>
@@ -63,11 +80,11 @@ function ModuleGuide({ module }: { module: Module }) {
       <table className="kv">
         <tbody>
           <tr>
-            <td>필요한 것</td>
+            <td>{t.newJob.needs}</td>
             <td>{info.needs}</td>
           </tr>
           <tr>
-            <td>나오는 것</td>
+            <td>{t.newJob.gives}</td>
             <td>{info.gives}</td>
           </tr>
         </tbody>
@@ -75,7 +92,7 @@ function ModuleGuide({ module }: { module: Module }) {
 
       {info.next && (
         <p className="next">
-          <strong>다음 단계 ({step === 3 ? "2로 되돌아감" : `${step + 1}단계`})</strong> {info.next}
+          <strong>{t.newJob.nextStep(step)}</strong> {info.next}
         </p>
       )}
       {info.caution && <p className="caution">{info.caution}</p>}
@@ -84,6 +101,7 @@ function ModuleGuide({ module }: { module: Module }) {
 }
 
 export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void }) {
+  const t = useT();
   const [module, setModule] = useState<FormModule>("CreateSchema");
   const [genesList, setGenesList] = useState("");
   const [keepInstead, setKeepInstead] = useState(false);
@@ -235,21 +253,17 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
   // 스키마 선택은 세 모듈이 그대로 공유한다 (AlleleCall · 평가 리포트 둘).
   const schemaField = (
     <div className="field">
-      <label htmlFor="schema">스키마</label>
+      <label htmlFor="schema">{t.newJob.schema}</label>
       <select id="schema" value={schemaId} onChange={(e) => setSchemaId(e.target.value)}>
-        <option value="">선택하세요</option>
+        <option value="">{t.common.select}</option>
         {schemas.map((s) => (
           <option key={s.schemaId} value={s.schemaId}>
             {s.name}
-            {s.lociCount ? ` (loci ${s.lociCount})` : ""}
+            {s.lociCount ? t.newJob.schemaLoci(s.lociCount) : ""}
           </option>
         ))}
       </select>
-      {schemas.length === 0 && (
-        <div className="hint">
-          아직 스키마가 없습니다. 먼저 CreateSchema 로 스키마를 만드세요.
-        </div>
-      )}
+      {schemas.length === 0 && <div className="hint">{t.newJob.noSchema}</div>}
     </div>
   );
   const ready =
@@ -274,10 +288,8 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
     <>
       <div className="page-head">
         <div>
-          <h1>새 작업</h1>
-          <p>
-            입력 파일은 실행 전에 WSL 내부로 복사됩니다. 원본은 수정되지 않습니다.
-          </p>
+          <h1>{t.newJob.title}</h1>
+          <p>{t.newJob.subtitle}</p>
         </div>
       </div>
 
@@ -286,24 +298,18 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
 
       <div className="card">
         <div className="field">
-          <label htmlFor="module">모듈</label>
+          <label htmlFor="module">{t.newJob.moduleField}</label>
           <select
             id="module"
             value={module}
             onChange={(e) => setModule(e.target.value as FormModule)}
           >
-            <option value="CreateSchema">CreateSchema — 어셈블리로부터 wgMLST 스키마 생성</option>
-            <option value="AlleleCall">AlleleCall — 균주별 allelic profile 결정</option>
-            <option value="ExtractCgMLST">ExtractCgMLST — allele 결과에서 core genome 추출</option>
-            <option value="RemoveGenes">RemoveGenes — 결과 표에서 loci 걸러내기</option>
-            <option value="JoinProfiles">JoinProfiles — 결과 표 여러 개 합치기</option>
-            <option value="PrepExternalSchema">
-              PrepExternalSchema — 외부 스키마를 변환해 들여오기
-            </option>
-            <option value="SchemaEvaluator">SchemaEvaluator — 스키마 품질 리포트</option>
-            <option value="AlleleCallEvaluator">
-              AlleleCallEvaluator — allele 결과 품질 리포트
-            </option>
+            {/* 영문 모듈명은 chewBBACA 의 하위 명령 이름이라 번역하지 않는다. */}
+            {MODULE_ORDER.map((m) => (
+              <option key={m} value={m}>
+                {m} — {t.moduleOption[m]}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -318,51 +324,47 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         ) : module === "AlleleCallEvaluator" ? (
           <>
             <div className="field">
-              <label htmlFor="results">AlleleCall 결과 폴더</label>
+              <label htmlFor="results">{t.newJob.resultsDir}</label>
               <div className="row">
                 <input
                   id="results"
                   type="text"
                   value={resultsDir}
                   readOnly
-                  placeholder="results_<날짜시각> 폴더를 선택하세요"
+                  placeholder={t.newJob.resultsDirPlaceholder}
                 />
-                <button onClick={() => void pickDir(setResultsDir)}>찾아보기</button>
+                <button onClick={() => void pickDir(setResultsDir)}>{t.common.browse}</button>
               </div>
-              <div className="hint">
-                파일 하나가 아니라 <b>폴더</b>를 고릅니다. 그 안의 여러 파일을 함께 읽기
-                때문입니다. <code>[입력이 이미 CDS 입니다]</code> 를 켜고 돌린 결과에는
-                필요한 파일(<code>cds_coordinates.tsv</code>)이 없어 리포트를 만들 수 없습니다.
-              </div>
+              <div className="hint">{t.newJob.resultsDirHint}</div>
             </div>
             {schemaField}
           </>
         ) : module === "PrepExternalSchema" ? (
           <div className="field">
-            <label htmlFor="input">외부 스키마 폴더</label>
+            <label htmlFor="input">{t.newJob.externalSchemaDir}</label>
             <div className="row">
               <input
                 id="input"
                 type="text"
                 value={inputDir}
                 readOnly
-                placeholder="loci FASTA 가 들어 있는 폴더"
+                placeholder={t.newJob.externalSchemaPlaceholder}
               />
-              <button onClick={() => void pickDir(setInputDir)}>찾아보기</button>
+              <button onClick={() => void pickDir(setInputDir)}>{t.common.browse}</button>
             </div>
             <div className="hint">
               {inputInfo
-                ? `파일 ${inputInfo.totalFiles}개 (FASTA로 보이는 파일 ${inputInfo.fastaFiles}개)`
-                : "loci 하나당 FASTA 파일 하나로 되어 있어야 합니다. 압축을 푼 스키마 폴더를 그대로 고르세요."}
+                ? t.newJob.inputSummary(inputInfo.totalFiles, inputInfo.fastaFiles)
+                : t.newJob.externalSchemaHint}
             </div>
           </div>
         ) : module === "JoinProfiles" ? (
           <div className="field">
-            <label>합칠 결과 파일 — 두 개 이상</label>
+            <label>{t.newJob.joinLabel}</label>
             <div className="row">
-              <button onClick={() => void pickProfiles()}>파일 고르기</button>
+              <button onClick={() => void pickProfiles()}>{t.newJob.pickFiles}</button>
               {profilesFiles.length > 0 && (
-                <button onClick={() => setProfilesFiles([])}>비우기</button>
+                <button onClick={() => setProfilesFiles([])}>{t.newJob.clearFiles}</button>
               )}
             </div>
             {profilesFiles.length > 0 ? (
@@ -372,57 +374,55 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 ))}
               </ul>
             ) : (
-              <div className="hint">
-                같은 스키마로 만든 results_alleles.tsv 를 두 개 이상 고르세요.
-                Ctrl 을 누른 채 여러 개를 선택할 수 있습니다.
-              </div>
+              <div className="hint">{t.newJob.joinHint}</div>
             )}
           </div>
         ) : module === "ExtractCgMLST" || module === "RemoveGenes" ? (
           <div className="field">
-            <label htmlFor="profiles">AlleleCall 결과 파일</label>
+            <label htmlFor="profiles">{t.newJob.profilesFile}</label>
             <div className="row">
               <input
                 id="profiles"
                 type="text"
                 value={profilesFile}
                 readOnly
-                placeholder="results_alleles.tsv 를 선택하세요"
+                placeholder={t.newJob.profilesPlaceholder}
               />
-              <button
-                onClick={() => void pickFile(setProfilesFile, "allelic profile", ["tsv"])}
-              >
-                찾아보기
+              <button onClick={() => void pickFile(setProfilesFile, "allelic profile", ["tsv"])}>
+                {t.common.browse}
               </button>
             </div>
             {profilesInfo && !profilesInfo.looksValid ? (
               <div className="banner error" style={{ marginTop: 8, marginBottom: 0 }}>
-                이 파일은 allelic profile 표가 아닙니다 — 첫 열이{" "}
-                <code>{profilesInfo.firstColumn}</code>, 열 {profilesInfo.loci + 1}개입니다.
+                {t.newJob.profilesInvalid(profilesInfo.firstColumn, profilesInfo.loci + 1)}
                 <br />
-                AlleleCall 결과 폴더의 <code>results_alleles.tsv</code> 를 선택하세요. 같은
-                폴더의 다른 TSV(<code>cds_coordinates.tsv</code> 등)를 넣으면 각 행이 균주로
-                취급되어 오래 실행된 뒤 쓸모없는 결과가 나옵니다.
+                {t.newJob.profilesInvalidHelp}
               </div>
             ) : (
               <div className="hint">
                 {profilesInfo
-                  ? `균주 ${profilesInfo.genomes}개 × loci ${profilesInfo.loci}개`
-                  : "AlleleCall 결과 폴더 안의 results_alleles.tsv 입니다. 이 모듈은 어셈블리를 다시 읽지 않고 그 표만 봅니다."}
+                  ? t.newJob.profilesSummary(profilesInfo.genomes, profilesInfo.loci)
+                  : t.newJob.profilesHint}
               </div>
             )}
           </div>
         ) : (
           <div className="field">
-            <label htmlFor="input">어셈블리 폴더</label>
+            <label htmlFor="input">{t.newJob.assemblyDir}</label>
             <div className="row">
-              <input id="input" type="text" value={inputDir} readOnly placeholder="폴더를 선택하세요" />
-              <button onClick={() => void pickDir(setInputDir)}>찾아보기</button>
+              <input
+                id="input"
+                type="text"
+                value={inputDir}
+                readOnly
+                placeholder={t.newJob.assemblyPlaceholder}
+              />
+              <button onClick={() => void pickDir(setInputDir)}>{t.common.browse}</button>
             </div>
             <div className="hint">
               {inputInfo
-                ? `파일 ${inputInfo.totalFiles}개 (FASTA로 보이는 파일 ${inputInfo.fastaFiles}개)`
-                : "네트워크 드라이브(UNC) 경로는 지원하지 않습니다. 로컬 드라이브를 사용하세요."}
+                ? t.newJob.inputSummary(inputInfo.totalFiles, inputInfo.fastaFiles)
+                : t.newJob.assemblyHint}
             </div>
           </div>
         )}
@@ -430,25 +430,22 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         {module === "CreateSchema" && (
           <>
             <div className="field">
-              <label htmlFor="schemaName">스키마 이름</label>
+              <label htmlFor="schemaName">{t.newJob.schemaName}</label>
               <input
                 id="schemaName"
                 type="text"
                 value={schemaName}
                 onChange={(e) => setSchemaName(e.target.value)}
-                placeholder="예: Listeria monocytogenes 2026-08"
+                placeholder={t.newJob.schemaNamePlaceholder}
               />
-              <div className="hint">
-                스키마는 앱이 소유하며 WSL 내부에 저장됩니다. 목록·삭제·내보내기는 [스키마]
-                화면에서 할 수 있습니다.
-              </div>
+              <div className="hint">{t.newJob.schemaNameHint}</div>
             </div>
 
             <TrainingFileField
               id="ptf"
               value={ptf}
               onChange={setPtf}
-              hint="이 training file 은 스키마 안에 함께 보관되고, 이후 AlleleCall 에서 계속 같은 것이 쓰입니다. 결과 일관성을 위해 중간에 바꾸지 않습니다."
+              hint={t.newJob.ptfHintCreate}
             />
           </>
         )}
@@ -458,27 +455,35 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             {schemaField}
 
             <div className="field">
-              <label htmlFor="gl">일부 loci 만 대상으로 (--gl) — 선택</label>
+              <label htmlFor="gl">{t.newJob.lociListLabel}</label>
               <div className="row">
-                <input id="gl" type="text" value={lociList} readOnly placeholder="(선택) loci 목록 텍스트 파일" />
-                <button onClick={() => void pickFile(setLociList, "loci 목록", ["txt", "tsv"])}>
-                  찾아보기
+                <input
+                  id="gl"
+                  type="text"
+                  value={lociList}
+                  readOnly
+                  placeholder={t.newJob.lociListPlaceholder}
+                />
+                <button
+                  onClick={() =>
+                    void pickFile(setLociList, t.newJob.lociListFilter, ["txt", "tsv"])
+                  }
+                >
+                  {t.common.browse}
                 </button>
-                {lociList && <button onClick={() => setLociList("")}>지우기</button>}
+                {lociList && <button onClick={() => setLociList("")}>{t.common.clear}</button>}
               </div>
               {lociInfo && !lociInfo.looksValid ? (
                 <div className="banner error" style={{ marginTop: 8, marginBottom: 0 }}>
-                  loci 목록 파일이 아닙니다
-                  {lociInfo.tabbed ? " — 탭으로 나뉜 표입니다." : " — 비어 있습니다."}
+                  {t.newJob.lociListInvalid(lociInfo.tabbed)}
                   <br />
-                  ExtractCgMLST 가 만든 <code>cgMLSTschema95.txt</code> 처럼 한 줄에 loci
-                  이름 하나만 있는 파일을 선택하세요.
+                  {t.newJob.lociListInvalidHelp}
                 </div>
               ) : (
                 <div className="hint">
                   {lociInfo
-                    ? `loci ${lociInfo.loci}개를 대상으로 실행합니다`
-                    : "이 목록은 ExtractCgMLST 가 만들어 줍니다 (cgMLSTschema95.txt 등). 비워두면 스키마의 모든 loci 를 대상으로 합니다."}
+                    ? t.newJob.lociListSummary(lociInfo.loci)
+                    : t.newJob.lociListHint}
                 </div>
               )}
             </div>
@@ -488,38 +493,40 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
         {module === "PrepExternalSchema" && (
           <>
             <div className="field">
-              <label htmlFor="schemaName">스키마 이름</label>
+              <label htmlFor="schemaName">{t.newJob.schemaName}</label>
               <input
                 id="schemaName"
                 type="text"
                 value={schemaName}
                 onChange={(e) => setSchemaName(e.target.value)}
-                placeholder="예: Listeria cgMLST (Ridom)"
+                placeholder={t.newJob.externalNamePlaceholder}
               />
-              <div className="hint">
-                목록에 표시될 이름입니다. 어디서 가져온 스키마인지 적어두면 나중에 구분하기
-                좋습니다.
-              </div>
+              <div className="hint">{t.newJob.externalNameHint}</div>
             </div>
-            <TrainingFileField
-              id="ptf2"
-              value={ptf}
-              onChange={setPtf}
-              hint="외부 스키마에 함께 제공된 training file 이라면 그대로 쓰면 됩니다. 원 스키마가 무엇으로 만들어졌는지 모른 채 다른 것을 넣으면 CDS 경계가 어긋납니다."
-            />
+            <TrainingFileField id="ptf2" value={ptf} onChange={setPtf} hint={t.newJob.ptfHintPrep} />
           </>
         )}
 
         {module === "RemoveGenes" && (
           <>
             <div className="field">
-              <label htmlFor="genes">대상 loci 목록</label>
+              <label htmlFor="genes">{t.newJob.genesList}</label>
               <div className="row">
-                <input id="genes" type="text" value={genesList} readOnly placeholder="loci 이름이 한 줄에 하나씩" />
-                <button onClick={() => void pickFile(setGenesList, "loci 목록", ["txt", "tsv"])}>
-                  찾아보기
+                <input
+                  id="genes"
+                  type="text"
+                  value={genesList}
+                  readOnly
+                  placeholder={t.newJob.genesListPlaceholder}
+                />
+                <button
+                  onClick={() =>
+                    void pickFile(setGenesList, t.newJob.lociListFilter, ["txt", "tsv"])
+                  }
+                >
+                  {t.common.browse}
                 </button>
-                {genesList && <button onClick={() => setGenesList("")}>지우기</button>}
+                {genesList && <button onClick={() => setGenesList("")}>{t.common.clear}</button>}
               </div>
             </div>
             <div className="field">
@@ -529,11 +536,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                   checked={keepInstead}
                   onChange={(e) => setKeepInstead(e.target.checked)}
                 />
-                목록에 있는 것만 남긴다 (--inverse)
+                {t.newJob.keepInstead}
               </label>
-              <div className="hint">
-                끄면 목록의 loci 를 <b>제거</b>하고, 켜면 목록의 loci 만 <b>남깁니다</b>.
-              </div>
+              <div className="hint">{t.newJob.keepInsteadHint}</div>
             </div>
           </>
         )}
@@ -546,12 +551,9 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 checked={commonOnly}
                 onChange={(e) => setCommonOnly(e.target.checked)}
               />
-              공통 loci 만으로 합친다 (--common)
+              {t.newJob.commonOnly}
             </label>
-            <div className="hint">
-              열 구성이 다른 표를 합칠 때 켜세요. 스키마가 자란 뒤의 결과를 예전 결과와
-              합치는 경우가 여기 해당합니다.
-            </div>
+            <div className="hint">{t.newJob.commonOnlyHint}</div>
           </div>
         )}
 
@@ -563,31 +565,23 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 checked={lociReports}
                 onChange={(e) => setLociReports(e.target.checked)}
               />
-              loci 마다 상세 페이지도 만든다 (--loci-reports)
+              {t.newJob.lociReports}
             </label>
-            <div className="hint">
-              loci 하나하나의 길이 분포와 정렬(MSA)을 볼 수 있게 됩니다. 대신 loci 마다
-              MAFFT 를 돌리므로 훨씬 오래 걸리고(loci 3,127개 기준 3초 → 39초) 결과 폴더에
-              loci 수만큼 HTML 파일이 생깁니다.
-            </div>
+            <div className="hint">{t.newJob.lociReportsHint}</div>
           </div>
         )}
 
         {module === "ExtractCgMLST" && (
           <div className="field">
-            <label htmlFor="thr">존재 임계값 (--t) — 선택</label>
+            <label htmlFor="thr">{t.newJob.thresholds}</label>
             <input
               id="thr"
               type="text"
               value={thresholds}
               onChange={(e) => setThresholds(e.target.value)}
-              placeholder="비우면 0.95 / 0.99 / 1 을 모두 계산"
+              placeholder={t.newJob.thresholdsPlaceholder}
             />
-            <div className="hint">
-              어떤 loci 를 core 로 볼지 정하는 기준입니다. 0.95 면 &quot;균주의 95% 이상에
-              존재하는 loci&quot; 를 뜻합니다. 공백으로 구분해 여러 값을 넣을 수 있고, 값마다
-              결과 한 벌씩 나옵니다.
-            </div>
+            <div className="hint">{t.newJob.thresholdsHint}</div>
           </div>
         )}
 
@@ -600,17 +594,17 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
                 checked={cdsInput}
                 onChange={(e) => setCdsInput(e.target.checked)}
               />
-              입력이 이미 CDS 입니다 (--cds)
+              {t.newJob.cdsInput}
             </label>
-            <div className="hint">
-              게놈 전체가 아니라 단백질 코딩 서열만 담긴 FASTA 라면 켜세요. 유전자 예측
-              (Prodigal)을 건너뜁니다. 잘못 켜면 결과가 크게 달라집니다.
-            </div>
+            <div className="hint">{t.newJob.cdsInputHint}</div>
           </div>
         )}
 
         <div className="field">
-          <label htmlFor="output">결과 폴더{producesSchema ? " — 선택" : ""}</label>
+          <label htmlFor="output">
+            {t.newJob.outputDir}
+            {producesSchema ? t.common.optional : ""}
+          </label>
           <div className="row">
             <input
               id="output"
@@ -618,22 +612,24 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
               value={outputDir}
               readOnly
               placeholder={
-                producesSchema ? "(선택) 비워두어도 됩니다" : "폴더를 선택하세요"
+                producesSchema
+                  ? t.newJob.outputOptionalPlaceholder
+                  : t.newJob.assemblyPlaceholder
               }
             />
-            <button onClick={() => void pickDir(setOutputDir)}>찾아보기</button>
+            <button onClick={() => void pickDir(setOutputDir)}>{t.common.browse}</button>
             {producesSchema && outputDir && (
-              <button onClick={() => setOutputDir("")}>지우기</button>
+              <button onClick={() => setOutputDir("")}>{t.common.clear}</button>
             )}
           </div>
           <div className="hint">
             {producesSchema
-              ? "만들어진 스키마는 앱 저장소에 보관되고 [스키마] 화면에서 관리합니다. 이 폴더를 지정하면 실행 로그 사본만 남습니다 — 스키마 파일은 [스키마] → [내보내기] 로 꺼냅니다."
+              ? t.newJob.outputHintSchema
               : module === "AlleleCall"
-                ? "AlleleCall 결과가 이 폴더로 회수됩니다."
+                ? t.newJob.outputHintAlleleCall
                 : isEvaluator
-                  ? "리포트 HTML 이 이 폴더로 회수됩니다. 다 끝나면 [작업 상세] 의 [리포트 열기] 로 브라우저에서 볼 수 있습니다."
-                  : "cgMLST 프로파일과 loci 목록(cgMLSTschema*.txt)이 이 폴더로 회수됩니다."}
+                  ? t.newJob.outputHintEvaluator
+                  : t.newJob.outputHintExtract}
           </div>
         </div>
 
@@ -641,25 +637,24 @@ export default function NewJobPage({ onSubmitted }: { onSubmitted: () => void })
             값을 넣어도 아무 일이 없는데 사용자는 반영됐다고 믿는다. */}
         {!NO_CPU.includes(module) && (
         <div className="field">
-          <label htmlFor="cpu">CPU 개수 — 선택</label>
+          <label htmlFor="cpu">{t.newJob.cpu}</label>
           <input
             id="cpu"
             type="number"
             min={1}
             value={cpu}
             onChange={(e) => setCpu(e.target.value)}
-            placeholder={backend?.cpuCount ? `기본값: ${backend.cpuCount}` : "비우면 자동"}
+            placeholder={
+              backend?.cpuCount ? t.newJob.cpuDefault(backend.cpuCount) : t.newJob.cpuAuto
+            }
           />
-          <div className="hint">
-            비워두면 WSL 내부에서 확인한 코어 수를 사용합니다. Windows 논리 코어 수와 다를 수
-            있습니다.
-          </div>
+          <div className="hint">{t.newJob.cpuHint}</div>
         </div>
         )}
 
         <div className="row">
           <button className="primary" disabled={!ready || busy} onClick={() => void submit()}>
-            {busy ? "등록 중..." : "실행"}
+            {busy ? t.newJob.submitting : t.newJob.submit}
           </button>
         </div>
       </div>

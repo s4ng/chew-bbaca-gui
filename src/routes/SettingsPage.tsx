@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 
 import DataDirField from "../components/DataDirField";
-import { formatBytes, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
+import { formatBytes } from "../lib/format";
+import { useLangSetting, useT, type LangSetting } from "../lib/i18n";
 import {
   backendStatus,
   diskCompact,
@@ -30,6 +31,7 @@ import {
 const isOnlyCopy = (e: WorkDirEntry) => e.status === "completed" && e.outputPath == null;
 
 export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Promise<void> | void }) {
+  const t = useT();
   const [settings, setSettings] = useState<Settings | null>(null);
   const [backend, setBackend] = useState<BackendStatus | null>(null);
   const [disk, setDisk] = useState<DiskUsage | null>(null);
@@ -95,14 +97,12 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
   };
 
   const regenerate = async () => {
-    const ok = window.confirm(
-      "새 토큰을 발급합니다.\n지금까지 배포한 클라이언트 설정은 즉시 접속할 수 없게 되며, 새 설정을 다시 붙여넣어야 합니다.\n계속할까요?",
-    );
+    const ok = window.confirm(t.settings.mcpRegenerateConfirm);
     if (!ok) return;
     setBusy(true);
     try {
       setMcp(await mcpRegenerateToken());
-      setMessage("새 토큰을 발급했습니다. 아래 설정을 클라이언트에 다시 붙여넣으세요.");
+      setMessage(t.settings.mcpRegenerated);
     } catch (e) {
       setError(asAppError(e).message);
     } finally {
@@ -129,7 +129,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     setError(null);
     try {
       await navigator.clipboard.writeText(value);
-      setMessage(`${label} 복사했습니다.`);
+      setMessage(t.settings.mcpCopied(label));
     } catch {
       // 웹뷰가 보안 컨텍스트가 아니면 클립보드 API 가 없다. 그때는 직접 고르게 한다.
       const el = document.getElementById(elementId) as
@@ -137,7 +137,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
         | HTMLTextAreaElement
         | null;
       el?.select();
-      setMessage("복사하지 못했습니다. 칸이 선택되었으니 Ctrl+C 를 누르세요.");
+      setMessage(t.settings.mcpCopyFailed);
     }
   };
 
@@ -145,7 +145,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     setSettings(next);
     try {
       await settingsSet(next);
-      setMessage("저장했습니다.");
+      setMessage(t.settings.saved);
     } catch (e) {
       setError(asAppError(e).message);
     }
@@ -164,8 +164,8 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       const total = list.reduce((sum, e) => sum + e.bytes, 0);
       setDiskMsg(
         list.length === 0
-          ? "지울 임시 폴더가 없습니다. 성공한 작업은 이미 자동으로 정리되었습니다."
-          : `임시 폴더 ${list.length}개, 합계 ${formatBytes(total)} 를 찾았습니다. 지울 것을 고르세요.`,
+          ? t.settings.scanEmpty
+          : t.settings.scanFound(list.length, formatBytes(total)),
       );
     } catch (e) {
       setDiskError(asAppError(e).message);
@@ -180,13 +180,11 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     if (targets.length === 0) return;
     const risky = targets.filter(isOnlyCopy).length;
     const ok = window.confirm(
-      `임시 작업 폴더 ${targets.length}개를 지웁니다 (${formatBytes(
-        targets.reduce((sum, e) => sum + e.bytes, 0),
-      )}).\n` +
-        (risky > 0
-          ? `이 중 ${risky}개는 결과를 회수하지 않은 완료 작업입니다 — 백엔드의 이 폴더가 유일한 사본일 수 있습니다.\n`
-          : "") +
-        "Windows 결과 폴더는 건드리지 않습니다.\n되돌릴 수 없습니다. 계속할까요?",
+      t.settings.confirmPrune(
+        targets.length,
+        formatBytes(targets.reduce((sum, e) => sum + e.bytes, 0)),
+        risky,
+      ),
     );
     if (!ok) return;
     setBusy(true);
@@ -195,10 +193,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     setDiskError(null);
     try {
       const result = await workPrune(targets.map((e) => e.jobId));
-      setDiskMsg(
-        `임시 폴더 ${result.removed}개를 지워 ${formatBytes(result.freedBytes)} 를 비웠습니다. ` +
-          "Windows 여유 공간을 되찾으려면 이어서 [디스크 정리] 를 누르세요.",
-      );
+      setDiskMsg(t.settings.pruned(result.removed, formatBytes(result.freedBytes)));
       setPrunable(await workPrunable().catch(() => []));
       setPicked(new Set());
       setDisk(await diskUsage());
@@ -229,9 +224,8 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       const freed = before != null && after != null ? before - after : null;
       setDiskMsg(
         freed != null && freed > 0
-          ? `${note} 지금 ${formatBytes(freed)} 가 줄어 ${formatBytes(after)} 입니다.`
-          : `${note} 파일 크기는 아직 ${formatBytes(after)} 그대로입니다 — sparse 는 지연 반납이라, ` +
-            "배포판이 블록을 반납하는 만큼 앞으로 줄어듭니다.",
+          ? t.settings.compactedFreed(note, formatBytes(freed), formatBytes(after))
+          : t.settings.compactedSame(note, formatBytes(after)),
       );
     } catch (e) {
       setDiskError(asAppError(e).message);
@@ -242,14 +236,12 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
   };
 
   const removeEnv = async () => {
-    const ok = window.confirm(
-      "전용 배포판을 제거합니다.\n앱이 소유한 스키마도 함께 삭제됩니다. 필요하면 먼저 [스키마] 화면에서 내보내세요.\n되돌릴 수 없습니다. 계속할까요?",
-    );
+    const ok = window.confirm(t.settings.removeEnvConfirm);
     if (!ok) return;
     setBusy(true);
     try {
       await envUnregister();
-      setMessage("배포판을 제거했습니다.");
+      setMessage(t.settings.removedEnv);
       await onEnvChanged();
     } catch (e) {
       setError(asAppError(e).message);
@@ -259,55 +251,57 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
   };
 
   if (!settings) {
-    return <div className="empty">설정을 불러오는 중...</div>;
+    return <div className="empty">{t.settings.loading}</div>;
   }
 
   return (
     <>
       <div className="page-head">
         <div>
-          <h1>설정</h1>
-          <p>앱이 소유한 것만 다룹니다. 전역 WSL 설정(.wslconfig)은 수정하지 않습니다.</p>
+          <h1>{t.settings.title}</h1>
+          <p>{t.settings.subtitle}</p>
         </div>
       </div>
 
       {error && <div className="banner error">{error}</div>}
       {message && <div className="banner info">{message}</div>}
 
+      <LanguageCard />
+
       <div className="card">
-        <h2>실행 환경</h2>
+        <h2>{t.settings.envTitle}</h2>
         <table className="kv">
           <tbody>
             <tr>
-              <td>배포판</td>
+              <td>{t.settings.distro}</td>
               <td className="mono">{settings.distro}</td>
             </tr>
             <tr>
-              <td>chewBBACA</td>
-              <td>{backend?.chewbbacaVersion ?? "확인 불가"}</td>
+              <td>{t.settings.chewbbaca}</td>
+              <td>{backend?.chewbbacaVersion ?? t.settings.unknown}</td>
             </tr>
             <tr>
-              <td>CPU 코어</td>
-              <td>{backend?.cpuCount ?? "—"}</td>
+              <td>{t.settings.cpuCount}</td>
+              <td>{backend?.cpuCount ?? t.common.dash}</td>
             </tr>
             <tr>
-              <td>상태</td>
-              <td>{backend?.detail ?? "—"}</td>
+              <td>{t.settings.state}</td>
+              <td>{backend?.detail ?? t.common.dash}</td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <div className="card">
-        <h2>실행</h2>
+        <h2>{t.settings.runTitle}</h2>
         <div className="field">
-          <label htmlFor="cpu">기본 CPU 개수</label>
+          <label htmlFor="cpu">{t.settings.defaultCpu}</label>
           <input
             id="cpu"
             type="number"
             min={1}
             value={settings.defaultCpu ?? ""}
-            placeholder="비우면 자동 (WSL nproc)"
+            placeholder={t.settings.defaultCpuPlaceholder}
             onChange={(e) =>
               void save({
                 ...settings,
@@ -322,37 +316,29 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             checked={settings.keepWorkDir}
             onChange={(e) => void save({ ...settings, keepWorkDir: e.target.checked })}
           />
-          완료 후 임시 작업 폴더를 남겨둔다 (디버깅용)
+          {t.settings.keepWorkDir}
         </label>
       </div>
 
       <div className="card">
-        <h2>디스크</h2>
-        <p style={{ color: "var(--text-dim)" }}>
-          가상 디스크는 파일을 지워도 자동으로 줄지 않습니다. 대용량 분석 뒤 Windows 여유
-          공간이 돌아오지 않으면 아래 버튼으로 정리하세요. 정리 중에는 배포판이 종료됩니다.
-        </p>
+        <h2>{t.settings.diskTitle}</h2>
+        <p style={{ color: "var(--text-dim)" }}>{t.settings.diskIntro}</p>
         <table className="kv">
           <tbody>
             <tr>
-              <td>가상 디스크</td>
+              <td>{t.settings.vhdx}</td>
               <td>{formatBytes(disk?.vhdxBytes ?? null)}</td>
             </tr>
           </tbody>
         </table>
         <DataDirField onChanged={() => void diskUsage().then(setDisk).catch(() => undefined)} />
-        <p style={{ color: "var(--text-dim)" }}>
-          임시 작업 폴더는 <strong>성공한 작업에서만</strong> 자동으로 지워집니다. 실패하거나
-          취소한 작업의 폴더는 남아 있고, 중간에 멈춘 AlleleCall 은 정리되지 못한 중간 파일까지
-          안고 있어 가장 큽니다. 먼저 비우고 나서 [디스크 정리] 를 눌러야 Windows 여유 공간이
-          실제로 돌아옵니다.
-        </p>
+        <p style={{ color: "var(--text-dim)" }}>{t.settings.pruneIntro}</p>
         <div className="row" style={{ marginTop: 10 }}>
           <button onClick={() => void loadPrunable()} disabled={busy}>
-            {diskAction === "scan" ? "훑어보는 중..." : "임시 폴더 훑어보기"}
+            {diskAction === "scan" ? t.settings.scanning : t.settings.scan}
           </button>
           <button onClick={() => void compact()} disabled={busy}>
-            {diskAction === "compact" ? "정리하는 중..." : "디스크 정리"}
+            {diskAction === "compact" ? t.settings.compacting : t.settings.compact}
           </button>
         </div>
 
@@ -386,12 +372,12 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
                             setPicked(next);
                           }}
                         />
-                        {MODULE_LABEL[e.module]}{" "}
-                        <span className={`pill ${e.status}`}>{STATUS_LABEL[e.status]}</span>
+                        {t.module[e.module]}{" "}
+                        <span className={`pill ${e.status}`}>{t.status[e.status]}</span>
                       </label>
                       {isOnlyCopy(e) && (
                         <div style={{ color: "var(--warn)", fontSize: "0.9em" }}>
-                          결과를 회수하지 않은 작업입니다 — 이 폴더가 유일한 사본일 수 있습니다.
+                          {t.settings.onlyCopy}
                         </div>
                       )}
                     </td>
@@ -407,25 +393,25 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
               style={{ marginTop: 10 }}
             >
               {diskAction === "prune"
-                ? "지우는 중..."
-                : `선택한 ${picked.size}개 지우기 (${formatBytes(
-                    prunable
-                      .filter((e) => picked.has(e.jobId))
-                      .reduce((sum, e) => sum + e.bytes, 0),
-                  )})`}
+                ? t.settings.pruning
+                : t.settings.pruneButton(
+                    picked.size,
+                    formatBytes(
+                      prunable
+                        .filter((e) => picked.has(e.jobId))
+                        .reduce((sum, e) => sum + e.bytes, 0),
+                    ),
+                  )}
             </button>
           </>
         )}
       </div>
 
       <div className="card">
-        <h2>rootfs 이미지</h2>
-        <p style={{ color: "var(--text-dim)" }}>
-          chewBBACA 이미지는 <strong>앱에 포함되어 배포</strong>됩니다. 아래 칸은 비워 두는 것이
-          정상이고, 직접 빌드한 rootfs 로 바꿔 쓸 때만 채우면 됩니다.
-        </p>
+        <h2>{t.settings.rootfsTitle}</h2>
+        <p style={{ color: "var(--text-dim)" }}>{t.settings.rootfsIntro}</p>
         <div className="field">
-          <label htmlFor="url">파일 경로 또는 URL (비우면 포함된 이미지 사용)</label>
+          <label htmlFor="url">{t.settings.rootfsUrl}</label>
           <input
             id="url"
             type="text"
@@ -435,11 +421,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             }
             onBlur={() => void save(settings)}
           />
-          <div className="hint">
-            로컬 tar.gz 경로를 넣으면 그 파일을 그대로 검증해 등록하고, http(s) 주소를 넣으면
-            내려받습니다 (예: C:\…\dist-rootfs\chewie-rootfs-3.5.4.tar.gz). 값을 넣으면
-            앱에 포함된 이미지 대신 이쪽을 씁니다 — 체크섬도 함께 바꿔야 합니다.
-          </div>
+          <div className="hint">{t.settings.rootfsUrlHint}</div>
         </div>
         <div className="field">
           <label htmlFor="sha">SHA256</label>
@@ -452,29 +434,25 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             }
             onBlur={() => void save(settings)}
           />
-          <div className="hint">64자리 16진수. 일치하지 않으면 받은 파일을 폐기합니다.</div>
+          <div className="hint">{t.settings.rootfsShaHint}</div>
         </div>
       </div>
 
       <div className="card">
-        <h2>MCP 서버</h2>
-        <p style={{ color: "var(--text-dim)" }}>
-          ChatGPT 데스크톱 앱 같은 MCP 클라이언트가 이 앱의 기능을 읽고 실행할 수 있게 합니다.
-          서버는 <strong>이 앱이 켜져 있는 동안에만</strong> 동작하고, 같은 PC(127.0.0.1)에서만
-          접속할 수 있습니다.
-        </p>
+        <h2>{t.settings.mcpTitle}</h2>
+        <p style={{ color: "var(--text-dim)" }}>{t.settings.mcpIntro}</p>
         <table className="kv">
           <tbody>
             <tr>
-              <td>상태</td>
+              <td>{t.settings.state}</td>
               <td>
                 {!mcp
-                  ? "확인 중..."
+                  ? t.settings.mcpChecking
                   : mcp.running
-                    ? `실행 중 · ${mcp.url}`
+                    ? t.settings.mcpRunning(mcp.url ?? "")
                     : mcp.enabled
-                      ? "시작하지 못했습니다 (포트 충돌일 수 있습니다)"
-                      : "꺼져 있음"}
+                      ? t.settings.mcpFailed
+                      : t.settings.mcpOff}
               </td>
             </tr>
           </tbody>
@@ -487,7 +465,7 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             disabled={!mcp || busy}
             onChange={(e) => void applyMcp(e.target.checked, port, mcp?.allowRun ?? true)}
           />
-          MCP 서버 사용
+          {t.settings.mcpEnable}
         </label>
         <label className="inline-check">
           <input
@@ -496,15 +474,14 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             disabled={!mcp || busy}
             onChange={(e) => void applyMcp(mcp?.enabled ?? true, port, e.target.checked)}
           />
-          작업 실행 허용 (끄면 읽기 전용이 됩니다)
+          {t.settings.mcpAllowRun}
         </label>
         <div className="hint" style={{ marginBottom: 10 }}>
-          켜 두면 클라이언트가 요청한 작업이 <strong>앱에서 다시 묻지 않고</strong> 큐에 들어갑니다.
-          클라이언트 쪽에도 별도의 도구 승인 설정이 있을 수 있습니다.
+          {t.settings.mcpAllowRunHint}
         </div>
 
         <div className="field">
-          <label htmlFor="mcp-port">포트</label>
+          <label htmlFor="mcp-port">{t.settings.mcpPort}</label>
           <input
             id="mcp-port"
             type="number"
@@ -519,21 +496,22 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
               }
             }}
           />
-          <div className="hint">
-            사용 중이면 다음 포트로 자동으로 밀립니다. 위의 [상태] 에 실제 주소가 표시됩니다.
-          </div>
+          <div className="hint">{t.settings.mcpPortHint}</div>
         </div>
 
-        <h3 style={{ margin: "18px 0 4px", fontSize: 14 }}>클라이언트에 넣을 값</h3>
+        <h3 style={{ margin: "18px 0 4px", fontSize: 14 }}>{t.settings.mcpClientValues}</h3>
         <div className="hint" style={{ marginBottom: 8 }}>
-          ChatGPT 데스크톱 앱의 [맞춤형 MCP에 연결] 화면은 칸이 따로 있습니다. 아래 세 값을
-          해당 칸에 하나씩 붙여 넣으세요. 유형은 <strong>스트리밍 가능한 HTTP</strong> 입니다.
+          {t.settings.mcpClientValuesHint}
         </div>
 
         {[
           { id: "mcp-url", label: "URL", value: mcp?.connectUrl ?? "" },
-          { id: "mcp-header-name", label: "헤더 키", value: mcp?.headerName ?? "" },
-          { id: "mcp-header-value", label: "헤더 값", value: mcp?.headerValue ?? "" },
+          { id: "mcp-header-name", label: t.settings.mcpHeaderName, value: mcp?.headerName ?? "" },
+          {
+            id: "mcp-header-value",
+            label: t.settings.mcpHeaderValue,
+            value: mcp?.headerValue ?? "",
+          },
         ].map((row) => (
           <div className="field" key={row.id}>
             <label htmlFor={row.id}>{row.label}</label>
@@ -548,21 +526,19 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
                 onFocus={(e) => e.currentTarget.select()}
               />
               <button onClick={() => void copyValue(row.label, row.value, row.id)} disabled={!mcp}>
-                복사
+                {t.settings.mcpCopy}
               </button>
             </div>
           </div>
         ))}
 
         <div className="hint" style={{ marginBottom: 10 }}>
-          [헤더 값] 에는 토큰이 들어 있습니다. 다른 사람에게 그대로 보내지 마세요.
-          ChatGPT 폼의 <span className="mono">기본 token 환경 변수</span> 칸은 비워 둡니다 —
-          거기는 토큰이 아니라 환경 변수의 <em>이름</em>을 받는 자리입니다.
+          {t.settings.mcpTokenWarning}
         </div>
 
         <details style={{ marginBottom: 12 }}>
           <summary style={{ cursor: "pointer", fontSize: 14 }}>
-            설정 파일을 쓰는 클라이언트라면 (Codex CLI 등)
+            {t.settings.mcpConfigSummary}
           </summary>
           <textarea
             id="mcp-config"
@@ -574,39 +550,70 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             onFocus={(e) => e.currentTarget.select()}
           />
           <button
-            onClick={() => void copyValue("설정", mcp?.clientConfig ?? "", "mcp-config")}
+            onClick={() =>
+              void copyValue(t.settings.mcpConfigLabel, mcp?.clientConfig ?? "", "mcp-config")
+            }
             disabled={!mcp}
           >
-            복사
+            {t.settings.mcpCopy}
           </button>
-          <div className="hint">
-            <span className="mono">~/.codex/config.toml</span> 에 붙여 넣습니다.
-          </div>
+          <div className="hint">{t.settings.mcpConfigHint}</div>
         </details>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button onClick={() => void openMcpGuide()} disabled={busy}>
-            연결 방법 보기
+            {t.settings.mcpOpenGuide}
           </button>
           <button onClick={() => void regenerate()} disabled={!mcp || busy}>
-            토큰 재발급
+            {t.settings.mcpRegenerate}
           </button>
         </div>
         <div className="hint" style={{ marginTop: 8 }}>
-          ChatGPT 데스크톱 앱에 등록하는 방법을 그림과 함께 설명합니다. 등록했는데 도구가 안
-          보인다면 대화창이 <strong>Work</strong> 모드인지부터 확인하세요.
+          {t.settings.mcpGuideHint}
         </div>
       </div>
 
       <div className="card">
-        <h2>제거</h2>
-        <p style={{ color: "var(--text-dim)" }}>
-          전용 배포판을 통째로 제거합니다. 사용자의 다른 WSL 배포판에는 영향이 없습니다.
-        </p>
+        <h2>{t.settings.removeTitle}</h2>
+        <p style={{ color: "var(--text-dim)" }}>{t.settings.removeIntro}</p>
         <button className="danger" onClick={() => void removeEnv()} disabled={busy}>
-          배포판 제거
+          {t.settings.removeEnv}
         </button>
       </div>
     </>
+  );
+}
+
+/**
+ * 표시 언어 선택.
+ *
+ * 맨 위에 두는 이유는 단순하다 — 언어를 잘못 만난 사용자가 **읽지 못하는 화면을
+ * 스크롤하지 않고** 바꿀 수 있어야 한다. 그래서 이 카드만 제목도 두 언어를 함께
+ * 적고, 선택지는 각 언어의 자기 이름(한국어 / English)으로 둔다.
+ */
+function LanguageCard() {
+  const t = useT();
+  const { lang, setting, setSetting } = useLangSetting();
+
+  return (
+    <div className="card">
+      <h2>{t.lang.title}</h2>
+      <div className="field">
+        <label htmlFor="lang">{t.lang.label}</label>
+        <select
+          id="lang"
+          value={setting}
+          onChange={(e) => setSetting(e.target.value as LangSetting)}
+        >
+          <option value="auto">{t.lang.auto}</option>
+          <option value="ko">{t.lang.ko}</option>
+          <option value="en">{t.lang.en}</option>
+        </select>
+        <div className="hint">
+          {setting === "auto" ? `${t.lang.autoResolved(t.lang[lang])} ` : ""}
+          {t.lang.backendNote}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { useT } from "./lib/i18n";
 import { envProbe, guideOpen } from "./lib/ipc";
 import { asAppError, type EnvReport } from "./lib/types";
 import JobsPage from "./routes/JobsPage";
@@ -21,14 +22,10 @@ type View = "jobs" | "new" | "schemas" | "settings";
  */
 const DOCS_URL = "https://chewbbaca.readthedocs.io/en/latest/";
 
-const NAV: { id: View; label: string }[] = [
-  { id: "jobs", label: "작업" },
-  { id: "new", label: "새 작업" },
-  { id: "schemas", label: "스키마" },
-  { id: "settings", label: "설정" },
-];
+const NAV: View[] = ["jobs", "new", "schemas", "settings"];
 
 export default function App() {
+  const t = useT();
   const [report, setReport] = useState<EnvReport | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
@@ -67,7 +64,7 @@ export default function App() {
   if (checking && !report && !probeError) {
     return (
       <div className="onboarding">
-        <h1>환경을 확인하는 중...</h1>
+        <h1>{t.app.checking}</h1>
         <div className="progress indeterminate">
           <div />
         </div>
@@ -78,9 +75,9 @@ export default function App() {
   if (probeError) {
     return (
       <div className="onboarding">
-        <div className="banner error">환경 검사에 실패했습니다: {probeError}</div>
+        <div className="banner error">{t.app.probeFailed(probeError)}</div>
         <button className="primary" onClick={() => void recheck()}>
-          다시 검사
+          {t.app.recheck}
         </button>
       </div>
     );
@@ -97,14 +94,14 @@ export default function App() {
           <span>chewBBACA</span>
           <small>Desktop</small>
         </div>
-        {NAV.map((item) => (
+        {NAV.map((id) => (
           <button
-            key={item.id}
+            key={id}
             className="nav-item"
-            aria-current={view === item.id}
-            onClick={() => setView(item.id)}
+            aria-current={view === id}
+            onClick={() => setView(id)}
           >
-            {item.label}
+            {t.app.nav[id]}
           </button>
         ))}
         <div className="sidebar-footer">
@@ -115,9 +112,9 @@ export default function App() {
               setLinkError(null);
               void guideOpen().catch((e) => setLinkError(asAppError(e).message));
             }}
-            title="예제 데이터로 전 과정을 따라가 보는 안내서"
+            title={t.app.guideTitle}
           >
-            따라해보기 ↗
+            {t.app.guide}
           </button>
           <button
             className="doc-link"
@@ -127,14 +124,14 @@ export default function App() {
             }}
             title={DOCS_URL}
           >
-            chewBBACA 공식 문서 ↗
+            {t.app.docs}
           </button>
           {linkError && <div className="link-error">{linkError}</div>}
           <div className="distro">
-            배포판 <code>{report.distro}</code>
+            {t.app.distro} <code>{report.distro}</code>
           </div>
           {/* 버그 신고를 받을 때 가장 먼저 물어보는 값이라 항상 보이는 자리에 둔다. */}
-          {version && <div className="app-version">버전 {version}</div>}
+          {version && <div className="app-version">{t.app.version(version)}</div>}
         </div>
       </nav>
 

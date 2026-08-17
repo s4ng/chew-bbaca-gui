@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 import DataDirField from "../components/DataDirField";
+import { useT } from "../lib/i18n";
+import type { Messages } from "../lib/messages/ko";
 import {
   envFirmwareHint,
   envInstallWsl,
@@ -34,15 +36,14 @@ export default function Onboarding({
   checking: boolean;
   onRecheck: () => Promise<void> | void;
 }) {
+  const t = useT();
   const gate = report?.gate ?? "unknown";
 
   return (
     <div className="onboarding">
-      <h1>실행 환경 준비</h1>
+      <h1>{t.onboarding.title}</h1>
       <p style={{ color: "var(--text-dim)" }}>
-        chewBBACA 는 Linux 에서만 동작합니다. 이 앱은 전용 WSL2 배포판(
-        <code>{report?.distro ?? "chewie-env"}</code>)을 하나 만들어 그 안에서 실행합니다.
-        기존 WSL 배포판과 전역 설정은 건드리지 않습니다.
+        {t.onboarding.subtitle(report?.distro ?? "chewie-env")}
       </p>
 
       <GateSteps report={report} />
@@ -50,23 +51,17 @@ export default function Onboarding({
       {gate === "bios-virtualization" && <BiosGate report={report!} />}
       {gate === "wsl-missing" && <WslGate />}
       {gate === "distro-missing" && <DistroGate onDone={onRecheck} />}
-      {gate === "unknown" && (
-        <div className="banner warn">
-          환경을 판정하지 못했습니다. 아래 진단 정보를 확인하거나 프로젝트의
-          <code> scripts/check-env.bat </code>
-          를 실행해 주세요.
-        </div>
-      )}
+      {gate === "unknown" && <div className="banner warn">{t.onboarding.unknownGate}</div>}
 
       <div className="row" style={{ marginTop: 18 }}>
         <button onClick={() => void onRecheck()} disabled={checking}>
-          {checking ? "검사 중..." : "다시 검사"}
+          {checking ? t.onboarding.checking : t.onboarding.recheck}
         </button>
       </div>
 
       {report && report.messages.length > 0 && (
         <details className="card" style={{ marginTop: 18 }}>
-          <summary>진단 정보</summary>
+          <summary>{t.onboarding.diagnostics}</summary>
           <ul className="detail-list">
             {report.messages.map((m, i) => (
               <li key={i}>{m}</li>
@@ -75,25 +70,25 @@ export default function Onboarding({
           <table className="kv" style={{ marginTop: 10 }}>
             <tbody>
               <tr>
-                <td>HypervisorPresent</td>
-                <td>{String(report.hypervisorPresent ?? "확인 불가")}</td>
+                <td>{t.onboarding.hypervisor}</td>
+                <td>{String(report.hypervisorPresent ?? t.settings.unknown)}</td>
               </tr>
               <tr>
-                <td>펌웨어 가상화</td>
-                <td>{String(report.virtualizationFirmwareEnabled ?? "확인 불가")}</td>
+                <td>{t.onboarding.firmware}</td>
+                <td>{String(report.virtualizationFirmwareEnabled ?? t.settings.unknown)}</td>
               </tr>
               <tr>
-                <td>WSL 설치</td>
-                <td>{report.wslInstalled ? "예" : "아니오"}</td>
+                <td>{t.onboarding.wslInstalled}</td>
+                <td>{report.wslInstalled ? t.onboarding.yes : t.onboarding.no}</td>
               </tr>
               <tr>
-                <td>기존 배포판</td>
-                <td>{report.existingDistros.join(", ") || "(없음)"}</td>
+                <td>{t.onboarding.existingDistros}</td>
+                <td>{report.existingDistros.join(", ") || t.onboarding.noneParen}</td>
               </tr>
               <tr>
-                <td>제조사 / 모델</td>
+                <td>{t.onboarding.vendorModel}</td>
                 <td>
-                  {report.manufacturer ?? "—"} / {report.model ?? "—"}
+                  {report.manufacturer ?? t.common.dash} / {report.model ?? t.common.dash}
                 </td>
               </tr>
             </tbody>
@@ -108,6 +103,7 @@ export default function Onboarding({
 
 /** 게이트 3개의 통과 여부를 한 줄씩. */
 function GateSteps({ report }: { report: EnvReport | null }) {
+  const t = useT();
   const gate = report?.gate ?? "unknown";
   const hardwareOk = gate !== "bios-virtualization";
   const wslOk = hardwareOk && gate !== "wsl-missing";
@@ -116,18 +112,18 @@ function GateSteps({ report }: { report: EnvReport | null }) {
   const steps = [
     {
       state: gate === "bios-virtualization" ? "blocked" : hardwareOk ? "done" : "pending",
-      title: "① 하드웨어 가상화",
-      desc: "CPU 가상화가 켜져 있고 하이퍼바이저가 동작하는지 확인합니다.",
+      title: t.onboarding.step1,
+      desc: t.onboarding.step1Desc,
     },
     {
       state: gate === "wsl-missing" ? "blocked" : wslOk ? "done" : "pending",
-      title: "② WSL",
-      desc: "WSL2 가 설치되어 있어야 합니다. 설치에는 관리자 권한과 재부팅이 필요합니다.",
+      title: t.onboarding.step2,
+      desc: t.onboarding.step2Desc,
     },
     {
       state: gate === "distro-missing" ? "blocked" : distroOk ? "done" : "pending",
-      title: "③ 전용 배포판",
-      desc: "앱에 포함된 chewBBACA 이미지를 전용 배포판으로 등록합니다.",
+      title: t.onboarding.step3,
+      desc: t.onboarding.step3Desc,
     },
   ];
 
@@ -153,6 +149,7 @@ function GateSteps({ report }: { report: EnvReport | null }) {
  * 사용자는 헛된 재부팅 없이 자기 기기의 상태를 알게 된다.
  */
 function BiosGate({ report }: { report: EnvReport }) {
+  const t = useT();
   const [hint, setHint] = useState<FirmwareHint | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -163,9 +160,7 @@ function BiosGate({ report }: { report: EnvReport }) {
   }, [report.manufacturer]);
 
   const reboot = async () => {
-    const ok = window.confirm(
-      "지금 재부팅하고 UEFI 설정 화면으로 들어갑니다.\n저장하지 않은 작업이 있으면 먼저 저장하세요.\n계속할까요?",
-    );
+    const ok = window.confirm(t.onboarding.biosRebootConfirm);
     if (!ok) return;
     try {
       await envRebootToFirmware();
@@ -180,83 +175,57 @@ function BiosGate({ report }: { report: EnvReport }) {
 
   return (
     <div className="card">
-      <h2>{firmwareOn ? "가상화가 동작하지 않습니다" : "CPU 가상화가 꺼져 있습니다"}</h2>
+      <h2>{firmwareOn ? t.onboarding.biosTitleOn : t.onboarding.biosTitleOff}</h2>
       {firmwareOn ? (
         <>
-          <p>
-            펌웨어(BIOS/UEFI)의 가상화는 <strong>켜져 있는 것으로 확인</strong>되는데
-            하이퍼바이저가 동작하지 않습니다. 남은 원인은 Windows 쪽입니다.
-          </p>
+          <p>{t.onboarding.biosFirmwareOnIntro}</p>
           <ol style={{ color: "var(--text-dim)", lineHeight: 1.7 }}>
-            <li>
-              관리자 PowerShell 에서 <code>wsl --install --no-distribution</code> 을 실행하고
-              재부팅합니다. (Virtual Machine Platform 기능이 켜집니다.)
-            </li>
-            <li>
-              그래도 같다면 관리자 PowerShell 에서{" "}
-              <code>bcdedit /set hypervisorlaunchtype auto</code> 실행 후 재부팅합니다.
-              하이퍼바이저 기동이 꺼져 있는 경우입니다.
-            </li>
-            <li>
-              사내 보안 정책이나 다른 가상화 소프트웨어(VMware/VirtualBox 구버전)가 막고 있을
-              수도 있습니다.
-            </li>
+            <li>{t.onboarding.biosFirmwareOn1}</li>
+            <li>{t.onboarding.biosFirmwareOn2}</li>
+            <li>{t.onboarding.biosFirmwareOn3}</li>
           </ol>
-          <p style={{ color: "var(--text-dim)" }}>
-            아래 펌웨어 안내는 위 방법이 모두 실패했을 때 확인용으로 남겨 둡니다.
-          </p>
+          <p style={{ color: "var(--text-dim)" }}>{t.onboarding.biosFirmwareOnNote}</p>
         </>
       ) : (
-        <p>
-          Windows 11 이라고 해서 가상화가 켜져 있는 것은 아닙니다. 최소 요구사항(TPM 2.0,
-          Secure Boot)에 가상화는 포함되지 않습니다. 펌웨어(BIOS/UEFI)에서 켜야 합니다.
-        </p>
+        <p>{t.onboarding.biosFirmwareOffIntro}</p>
       )}
 
       {error && <div className="banner error">{error}</div>}
 
-      <h3>1. 펌웨어로 바로 들어가기</h3>
-      <p style={{ color: "var(--text-dim)" }}>
-        재부팅과 동시에 UEFI 설정으로 진입합니다. 부팅 중 키를 연타할 필요가 없습니다.
-        (레거시 BIOS 기기에서는 동작하지 않습니다 — 아래 수동 방법을 쓰세요.)
-      </p>
+      <h3>{t.onboarding.biosStep1}</h3>
+      <p style={{ color: "var(--text-dim)" }}>{t.onboarding.biosStep1Desc}</p>
       <button className="primary" onClick={() => void reboot()}>
-        재부팅하고 UEFI 열기
+        {t.onboarding.biosReboot}
       </button>
 
-      <h3 style={{ marginTop: 18 }}>2. 직접 들어가기</h3>
+      <h3 style={{ marginTop: 18 }}>{t.onboarding.biosStep2}</h3>
       <table className="kv">
         <tbody>
           <tr>
-            <td>제조사</td>
-            <td>{report.manufacturer ?? "확인 불가"}</td>
+            <td>{t.onboarding.biosVendor}</td>
+            <td>{report.manufacturer ?? t.settings.unknown}</td>
           </tr>
           <tr>
-            <td>진입 키</td>
-            <td>{hint?.entryKey ?? "—"}</td>
+            <td>{t.onboarding.biosEntryKey}</td>
+            <td>{hint?.entryKey ?? t.common.dash}</td>
           </tr>
           <tr>
-            <td>설정 위치</td>
-            <td>{hint?.menuPath ?? "—"}</td>
+            <td>{t.onboarding.biosMenuPath}</td>
+            <td>{hint?.menuPath ?? t.common.dash}</td>
           </tr>
         </tbody>
       </table>
-      <p style={{ color: "var(--text-dim)", marginTop: 8 }}>
-        설정 항목 이름은 제조사마다 다릅니다. Intel 은 <code>Intel Virtualization Technology</code>
-        /<code>VT-x</code>, AMD 는 <code>SVM Mode</code> 입니다.
-      </p>
+      <p style={{ color: "var(--text-dim)", marginTop: 8 }}>{t.onboarding.biosVendorNote}</p>
 
-      <h3>3. 확인 방법</h3>
-      <p style={{ color: "var(--text-dim)" }}>
-        작업 관리자 → 성능 → CPU 에서 <strong>가상화: 사용</strong> 이면 켜진 것입니다.
-        켠 뒤 이 화면에서 [다시 검사] 를 누르세요.
-      </p>
+      <h3>{t.onboarding.biosStep3}</h3>
+      <p style={{ color: "var(--text-dim)" }}>{t.onboarding.biosStep3Desc}</p>
     </div>
   );
 }
 
 /** WSL 설치 (§7.5). 버튼을 주되 수동 경로를 없애지 않는다. */
 function WslGate() {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [denied, setDenied] = useState(false);
@@ -284,43 +253,33 @@ function WslGate() {
 
   return (
     <div className="card">
-      <h2>WSL 설치가 필요합니다</h2>
-      <p>
-        관리자 권한과 재부팅이 필요합니다. 아래 버튼을 누르면 권한 상승 창(UAC)이 뜨고,
-        앱 본체는 계속 일반 권한으로 남습니다. 다른 Linux 배포판은 설치하지 않습니다.
-      </p>
+      <h2>{t.onboarding.wslTitle}</h2>
+      <p>{t.onboarding.wslIntro}</p>
 
       <button className="primary" onClick={() => void install()} disabled={busy}>
-        {busy ? "설치 중..." : "WSL 설치"}
+        {busy ? t.onboarding.wslInstalling : t.onboarding.wslInstall}
       </button>
 
       {message && <div className="banner info" style={{ marginTop: 12 }}>{message}</div>}
 
       {denied && (
         <div style={{ marginTop: 14 }}>
-          <div className="banner warn">
-            권한 상승이 거부되었습니다. 아래 명령을 <strong>관리자 PowerShell</strong> 에서 직접
-            실행해도 됩니다.
-          </div>
-          <p style={{ color: "var(--text-dim)" }}>
-            시작 → &quot;PowerShell&quot; 우클릭 → <strong>관리자 권한으로 실행</strong>
-          </p>
+          <div className="banner warn">{t.onboarding.wslDenied}</div>
+          <p style={{ color: "var(--text-dim)" }}>{t.onboarding.wslDeniedHow}</p>
           {commands.map((c) => (
             <CopyBox key={c} text={c} />
           ))}
         </div>
       )}
 
-      <p style={{ color: "var(--text-dim)", marginTop: 12 }}>
-        설치가 끝나면 <strong>재부팅</strong>한 뒤 이 앱을 다시 실행하세요. 중단된 지점을
-        기억할 필요는 없습니다 — 다시 켜면 이어서 진행됩니다.
-      </p>
+      <p style={{ color: "var(--text-dim)", marginTop: 12 }}>{t.onboarding.wslAfter}</p>
     </div>
   );
 }
 
 /** rootfs 확보 → 검증 → import (§7.3 ③). */
 function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
+  const t = useT();
   const [running, setRunning] = useState(false);
   const [event, setEvent] = useState<ProvisionEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -373,21 +332,10 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
 
   return (
     <div className="card">
-      <h2>{remote ? "chewBBACA 환경 내려받기" : "chewBBACA 환경 설치"}</h2>
-      <p>
-        chewBBACA 와 BLAST+ / MAFFT / FastTree 가 들어 있는 이미지를
-        {remote ? " 내려받아 " : " "}
-        전용 배포판으로 등록합니다. 한 번만 하면 됩니다.
-        {!remote && !missing && " 이미지는 앱에 포함되어 있어 인터넷 연결이 필요 없습니다."}
-      </p>
+      <h2>{remote ? t.onboarding.distroTitleRemote : t.onboarding.distroTitleLocal}</h2>
+      <p>{t.onboarding.distroIntro(remote, !remote && !missing)}</p>
 
-      {missing && (
-        <div className="banner warn">
-          앱에 포함된 rootfs 이미지를 찾을 수 없습니다. 인스톨러로 설치한 앱이라면 다시 설치해
-          주세요. 개발 중이라면 [설정] → rootfs 이미지 칸에 직접 빌드한 tar.gz 경로를 넣으면
-          됩니다.
-        </div>
-      )}
+      {missing && <div className="banner warn">{t.onboarding.distroMissing}</div>}
 
       {error && <div className="banner error">{error}</div>}
 
@@ -401,7 +349,7 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
       {running || event ? (
         <div style={{ marginTop: 12 }}>
           <div className="row spread">
-            <span>{stageLabel(event?.stage)}</span>
+            <span>{stageLabel(t, event?.stage)}</span>
             <span className="mono">{event?.message}</span>
           </div>
           <div className={`progress ${fraction == null ? "indeterminate" : ""}`}>
@@ -411,14 +359,12 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
       ) : null}
 
       {done ? (
-        <p style={{ color: "var(--text-dim)", marginTop: 12 }}>
-          환경이 준비되었습니다. 잠시 후 앱으로 들어갑니다...
-        </p>
+        <p style={{ color: "var(--text-dim)", marginTop: 12 }}>{t.onboarding.distroDone}</p>
       ) : (
         !running &&
         !missing && (
           <button className="primary" onClick={() => void start()} style={{ marginTop: 12 }}>
-            {remote ? "내려받고 설치" : "설치"}
+            {remote ? t.onboarding.distroInstallRemote : t.onboarding.distroInstall}
           </button>
         )
       )}
@@ -426,46 +372,38 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
   );
 }
 
-function stageLabel(stage?: ProvisionEvent["stage"]): string {
+function stageLabel(t: Messages, stage?: ProvisionEvent["stage"]): string {
   switch (stage) {
     case "download":
-      return "내려받는 중";
+      return t.onboarding.stageDownload;
     case "verify":
-      return "체크섬 검증";
+      return t.onboarding.stageVerify;
     case "import":
-      return "배포판 등록 중";
+      return t.onboarding.stageImport;
     case "done":
-      return "완료";
+      return t.onboarding.stageDone;
     default:
-      return "준비 중";
+      return t.onboarding.stageIdle;
   }
 }
 
 /** 끝내 불가능한 사용자를 위한 대안 (§7.7). "실행할 수 없습니다" 로 끝내지 않는다. */
 function Fallbacks() {
+  const t = useT();
   return (
     <details className="card">
-      <summary>환경을 구성할 수 없는 경우</summary>
-      <p style={{ marginTop: 10 }}>
-        BIOS 에 관리자 암호가 걸린 회사 장비처럼 끝내 불가능한 경우가 있습니다. 그때는 다음
-        두 가지를 쓸 수 있습니다.
-      </p>
+      <summary>{t.onboarding.fallbackTitle}</summary>
+      <p style={{ marginTop: 10 }}>{t.onboarding.fallbackIntro}</p>
       <ul>
-        <li>
-          <strong>Galaxy 웹 버전</strong> — usegalaxy.eu 에 chewBBACA 모듈(CreateSchema,
-          AlleleCall, DownloadSchema, PrepExternalSchema)이 등록되어 브라우저에서 실행할 수
-          있습니다. 다만 버전이 최신보다 뒤처질 수 있습니다.
-        </li>
-        <li>
-          <strong>결과 뷰어 모드</strong> — 다른 PC 에서 생성된 HTML 리포트와 TSV 를 이 앱으로
-          열람할 수 있습니다. <em>(v0.2 예정)</em>
-        </li>
+        <li>{t.onboarding.fallbackGalaxy}</li>
+        <li>{t.onboarding.fallbackViewer}</li>
       </ul>
     </details>
   );
 }
 
 function CopyBox({ text }: { text: string }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   return (
     <div className="copy-box">
@@ -478,7 +416,7 @@ function CopyBox({ text }: { text: string }) {
           });
         }}
       >
-        {copied ? "복사됨" : "복사"}
+        {copied ? t.onboarding.copied : t.onboarding.copy}
       </button>
     </div>
   );

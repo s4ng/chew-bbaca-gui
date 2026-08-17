@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 
+import { useT } from "../lib/i18n";
 import { appRestart, dataDirInfo, dataDirSet } from "../lib/ipc";
 import { asAppError, type DataDirInfo } from "../lib/types";
 
@@ -15,6 +16,7 @@ import { asAppError, type DataDirInfo } from "../lib/types";
  * 자라는데, C 드라이브가 작은 기기가 흔하다.
  */
 export default function DataDirField({ onChanged }: { onChanged?: () => void }) {
+  const t = useT();
   const [info, setInfo] = useState<DataDirInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -40,16 +42,12 @@ export default function DataDirField({ onChanged }: { onChanged?: () => void }) 
 
       // 앱을 다시 시작해야 새 경로로 배선된다. 거부해도 설정은 남는다 —
       // 그 사실을 말해주지 않으면 다음 실행에서 폴더가 바뀐 이유를 알 수 없다.
-      const now = window.confirm(
-        `데이터 폴더를 여기로 바꿨습니다:\n${root}\n\n` +
-          "적용하려면 앱을 다시 시작해야 합니다. 지금 다시 시작할까요?\n" +
-          "[취소] 를 눌러도 설정은 남아 다음 실행부터 적용됩니다.",
-      );
+      const now = window.confirm(t.dataDir.confirmRestart(root));
       if (now) {
         await appRestart();
         return;
       }
-      setMessage(`다음 실행부터 ${root} 를 씁니다.`);
+      setMessage(t.dataDir.appliesNextRun(root));
     } catch (e) {
       setError(asAppError(e).message);
     } finally {
@@ -62,22 +60,14 @@ export default function DataDirField({ onChanged }: { onChanged?: () => void }) 
     const picked = await open({ directory: true, multiple: false });
     if (typeof picked !== "string") return;
 
-    const ok = window.confirm(
-      `${picked}\n\n` +
-        "이 폴더 안에 ChewieApp 폴더를 만들어 데이터 폴더로 씁니다.\n" +
-        "여기에 수 GB 짜리 가상 디스크가 만들어지고, 앱을 제거할 때 이 폴더는 통째로 지워집니다.\n" +
-        "계속할까요?",
-    );
+    const ok = window.confirm(t.dataDir.confirmPick(picked));
     if (!ok) return;
     await change(picked);
   };
 
   const reset = async () => {
     if (!info) return;
-    const ok = window.confirm(
-      `데이터 폴더를 기본 위치로 되돌립니다:\n${info.defaultDir}\n\n` +
-        "지금 폴더에 있는 파일은 옮기지 않습니다. 계속할까요?",
-    );
+    const ok = window.confirm(t.dataDir.confirmReset(info.defaultDir));
     if (!ok) return;
     await change(info.defaultDir);
   };
@@ -86,17 +76,17 @@ export default function DataDirField({ onChanged }: { onChanged?: () => void }) 
 
   return (
     <div className="field">
-      <label>데이터 폴더</label>
+      <label>{t.dataDir.label}</label>
       <div className="row">
         <input className="path" value={info.current} readOnly />
         {info.changeable && (
           <>
             <button onClick={() => void pick()} disabled={busy}>
-              변경
+              {t.dataDir.change}
             </button>
             {!info.isDefault && (
               <button onClick={() => void reset()} disabled={busy}>
-                기본 위치로
+                {t.dataDir.reset}
               </button>
             )}
           </>
@@ -106,15 +96,11 @@ export default function DataDirField({ onChanged }: { onChanged?: () => void }) 
       {error && <div className="banner error">{error}</div>}
       {message && <div className="banner info">{message}</div>}
 
-      {info.changeable ? (
-        <div className="hint">
-          가상 디스크(<code>ext4.vhdx</code>)가 이 폴더에 만들어지고 분석을 돌릴수록 수 GB 까지
-          자랍니다. C 드라이브가 좁다면 <strong>설치 전에</strong> 다른 내장 드라이브로 바꿔
-          두세요. 이동식·네트워크 드라이브와 exFAT 은 쓸 수 없습니다.
-        </div>
-      ) : (
-        <div className="hint">{info.reason}</div>
-      )}
+      {/*
+        배포판이 이미 있으면 `reason` 은 Rust 가 만든 한국어 문장이다. 백엔드 문자열
+        번역은 이번 범위 밖이라, 그때는 그것을 그대로 보여준다 (`lib/i18n.tsx` 참조).
+      */}
+      <div className="hint">{info.changeable ? t.dataDir.hint : info.reason}</div>
     </div>
   );
 }

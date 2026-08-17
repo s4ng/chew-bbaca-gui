@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
 import { formatBytes, formatTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import {
   schemasDelete,
   schemasExport,
@@ -14,6 +15,7 @@ import {
 import { asAppError, type SchemaInfo, type TrainingFile } from "../lib/types";
 
 export default function SchemasPage() {
+  const t = useT();
   const [schemas, setSchemas] = useState<SchemaInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   // 어느 스키마가 무엇을 하는 중인지. 내보내기는 loci 수천 개를 옮기느라 몇 분이
@@ -57,11 +59,8 @@ export default function SchemasPage() {
     const dir = await open({ directory: true, multiple: false });
     if (typeof dir !== "string") return;
 
-    const suggested = dir.split(/[\\/]/).filter(Boolean).pop() ?? "가져온 스키마";
-    const name = window.prompt(
-      "이 스키마를 무엇으로 부를까요?\n(목록에 표시될 이름입니다)",
-      suggested,
-    );
+    const suggested = dir.split(/[\\/]/).filter(Boolean).pop() ?? t.schemas.defaultImportName;
+    const name = window.prompt(t.schemas.promptName, suggested);
     if (name === null) return;
 
     setImporting(true);
@@ -69,9 +68,7 @@ export default function SchemasPage() {
     setMessage(null);
     try {
       const info = await schemasImport(dir, name);
-      setMessage(
-        `'${info.name}' 를 가져왔습니다${info.lociCount ? ` (loci ${info.lociCount})` : ""}.`,
-      );
+      setMessage(t.schemas.imported(info.name, info.lociCount));
       await refresh();
     } catch (e) {
       setError(asAppError(e).message);
@@ -81,9 +78,7 @@ export default function SchemasPage() {
   };
 
   const remove = async (schema: SchemaInfo) => {
-    const ok = window.confirm(
-      `'${schema.name}' 스키마를 삭제합니다.\n이 스키마로 만든 기존 결과는 남지만, 같은 스키마로 이어서 AlleleCall 을 할 수 없게 됩니다.\n되돌릴 수 없습니다. 계속할까요?`,
-    );
+    const ok = window.confirm(t.schemas.confirmDelete(schema.name));
     if (!ok) return;
     setBusy({ id: schema.schemaId, action: "delete" });
     try {
@@ -100,17 +95,14 @@ export default function SchemasPage() {
     <>
       <div className="page-head">
         <div>
-          <h1>스키마</h1>
-          <p>
-            스키마는 앱이 소유하며 WSL 내부에 저장됩니다. AlleleCall 이 신규 allele 을 계속
-            추가하기 때문에, Windows 폴더에 두면 실행할 때마다 파일시스템 오버헤드가 쌓입니다.
-          </p>
+          <h1>{t.schemas.title}</h1>
+          <p>{t.schemas.subtitle}</p>
         </div>
         <div className="row">
           <button disabled={importing} onClick={() => void importSchema()}>
-            {importing ? "가져오는 중..." : "불러오기"}
+            {importing ? t.schemas.importing : t.schemas.import}
           </button>
-          <button onClick={() => void refresh()}>새로 고침</button>
+          <button onClick={() => void refresh()}>{t.common.refresh}</button>
         </div>
       </div>
 
@@ -119,10 +111,8 @@ export default function SchemasPage() {
 
       {schemas.length === 0 ? (
         <div className="empty">
-          <p>아직 스키마가 없습니다. [새 작업] → CreateSchema 로 만들 수 있습니다.</p>
-          <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
-            전에 [내보내기] 로 빼둔 폴더가 있다면 [불러오기] 로 되돌릴 수 있습니다.
-          </p>
+          <p>{t.schemas.empty}</p>
+          <p style={{ color: "var(--text-dim)", fontSize: 13 }}>{t.schemas.emptyHint}</p>
         </div>
       ) : (
         <div className="stack">
@@ -136,31 +126,33 @@ export default function SchemasPage() {
                 <div className="row">
                   <button disabled={busy?.id === s.schemaId} onClick={() => void exportSchema(s)}>
                     {busy?.id === s.schemaId && busy.action === "export"
-                      ? "내보내는 중..."
-                      : "내보내기"}
+                      ? t.schemas.exporting
+                      : t.schemas.export}
                   </button>
                   <button
                     className="danger"
                     disabled={busy?.id === s.schemaId}
                     onClick={() => void remove(s)}
                   >
-                    {busy?.id === s.schemaId && busy.action === "delete" ? "삭제 중..." : "삭제"}
+                    {busy?.id === s.schemaId && busy.action === "delete"
+                      ? t.schemas.deleting
+                      : t.common.remove}
                   </button>
                 </div>
               </div>
               <table className="kv" style={{ marginTop: 8 }}>
                 <tbody>
                   <tr>
-                    <td>생성</td>
-                    <td>{formatTime(s.createdAt)}</td>
+                    <td>{t.schemas.createdAt}</td>
+                    <td>{formatTime(s.createdAt, t)}</td>
                   </tr>
                   <tr>
-                    <td>loci 수</td>
-                    <td>{s.lociCount ?? "—"}</td>
+                    <td>{t.schemas.lociCount}</td>
+                    <td>{s.lociCount ?? t.common.dash}</td>
                   </tr>
                   <tr>
-                    <td>training file</td>
-                    <td className="path">{s.ptf ?? "없음"}</td>
+                    <td>{t.schemas.trainingFile}</td>
+                    <td className="path">{s.ptf ?? t.schemas.noTrainingFile}</td>
                   </tr>
                 </tbody>
               </table>
@@ -182,6 +174,7 @@ export default function SchemasPage() {
  * **지울 수 있는 곳이 어딘가 있어야** 한다.
  */
 function TrainingFiles({ onError }: { onError: (m: string | null) => void }) {
+  const t = useT();
   const [files, setFiles] = useState<TrainingFile[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -198,9 +191,7 @@ function TrainingFiles({ onError }: { onError: (m: string | null) => void }) {
   }, [refresh]);
 
   const remove = async (f: TrainingFile) => {
-    const ok = window.confirm(
-      `training file '${f.name}' 를 삭제합니다.\n이미 이것으로 만든 스키마는 자기 안에 사본을 갖고 있어 영향받지 않습니다.\n되돌릴 수 없습니다. 계속할까요?`,
-    );
+    const ok = window.confirm(t.schemas.confirmDeleteTraining(f.name));
     if (!ok) return;
     setBusy(f.name);
     try {
@@ -216,16 +207,12 @@ function TrainingFiles({ onError }: { onError: (m: string | null) => void }) {
 
   return (
     <div style={{ marginTop: 32 }}>
-      <h2>Prodigal training file</h2>
-      <p style={{ color: "var(--text-dim)", fontSize: 13 }}>
-        스키마를 만들 때 쓰는 종별 학습 파일입니다. [새 작업] → CreateSchema 의 training file
-        칸에서 게놈 폴더를 고르면 만들 수 있습니다. chewBBACA 가 배포하는 것은 19개 종뿐이라,
-        그 밖의 종은 직접 만들어야 합니다.
-      </p>
+      <h2>{t.schemas.trainingTitle}</h2>
+      <p style={{ color: "var(--text-dim)", fontSize: 13 }}>{t.schemas.trainingSubtitle}</p>
 
       {files.length === 0 ? (
         <div className="empty">
-          <p>아직 training file 이 없습니다.</p>
+          <p>{t.schemas.trainingEmpty}</p>
         </div>
       ) : (
         <div className="stack">
@@ -237,17 +224,17 @@ function TrainingFiles({ onError }: { onError: (m: string | null) => void }) {
                   <div className="path">{f.path}</div>
                 </div>
                 <button className="danger" disabled={busy === f.name} onClick={() => void remove(f)}>
-                  삭제
+                  {t.common.remove}
                 </button>
               </div>
               <table className="kv" style={{ marginTop: 8 }}>
                 <tbody>
                   <tr>
-                    <td>만든 날짜</td>
-                    <td>{formatTime(f.createdAt)}</td>
+                    <td>{t.schemas.trainingCreatedAt}</td>
+                    <td>{formatTime(f.createdAt, t)}</td>
                   </tr>
                   <tr>
-                    <td>크기</td>
+                    <td>{t.schemas.trainingSize}</td>
                     <td>{formatBytes(f.sizeBytes)}</td>
                   </tr>
                 </tbody>

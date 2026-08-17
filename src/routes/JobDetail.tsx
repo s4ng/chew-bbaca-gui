@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 
-import { formatDuration, formatTime, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
+import { formatDuration, formatTime } from "../lib/format";
+import { useT } from "../lib/i18n";
 import { jobsCancel, jobsGet, jobsLog, onLog, onProgress, onState, reportOpen } from "../lib/ipc";
 import { asAppError, type Job, type LogStream } from "../lib/types";
 
@@ -22,6 +23,7 @@ export default function JobDetail({
   onBack: () => void;
   onChanged: () => Promise<void> | void;
 }) {
+  const t = useT();
   const [job, setJob] = useState<Job | null>(null);
   const [lines, setLines] = useState<Line[]>([]);
   const [progress, setProgress] = useState<{ fraction: number; label: string } | null>(null);
@@ -82,8 +84,7 @@ export default function JobDetail({
   }, [lines, follow]);
 
   const cancel = async () => {
-    if (!window.confirm("실행 중인 작업을 취소합니다. 진행 중인 계산은 버려집니다. 계속할까요?"))
-      return;
+    if (!window.confirm(t.jobDetail.confirmCancel)) return;
     try {
       await jobsCancel(jobId);
     } catch (e) {
@@ -112,14 +113,14 @@ export default function JobDetail({
       <div className="page-head">
         <div>
           <button className="link" onClick={onBack}>
-            ← 작업 목록
+            {t.jobDetail.back}
           </button>
-          <h1>{job ? MODULE_LABEL[job.module] : "작업"}</h1>
+          <h1>{job ? t.module[job.module] : t.jobDetail.fallbackTitle}</h1>
           <p>
             {job && (
               <>
-                <span className={`pill ${job.status}`}>{STATUS_LABEL[job.status]}</span>{" "}
-                {formatDuration(job.startedAt, job.finishedAt)}
+                <span className={`pill ${job.status}`}>{t.status[job.status]}</span>{" "}
+                {formatDuration(job.startedAt, job.finishedAt, t)}
               </>
             )}
           </p>
@@ -127,15 +128,17 @@ export default function JobDetail({
         <div className="row">
           {hasReport && (
             <button className="primary" onClick={() => void openReport()}>
-              리포트 열기
+              {t.jobDetail.openReport}
             </button>
           )}
           {job?.outputPath && (
-            <button onClick={() => void revealItemInDir(job.outputPath!)}>결과 폴더 열기</button>
+            <button onClick={() => void revealItemInDir(job.outputPath!)}>
+              {t.jobDetail.openOutput}
+            </button>
           )}
           {running && (
             <button className="danger" onClick={() => void cancel()}>
-              취소
+              {t.jobDetail.cancel}
             </button>
           )}
         </div>
@@ -147,7 +150,7 @@ export default function JobDetail({
       {running && (
         <div className="card tight">
           <div className="row spread">
-            <span>{progress?.label ?? "진행 중"}</span>
+            <span>{progress?.label ?? t.jobDetail.running}</span>
             <span className="mono">{fraction == null ? "" : `${Math.round(fraction * 100)}%`}</span>
           </div>
           <div className={`progress ${fraction == null ? "indeterminate" : ""}`}>
@@ -158,15 +161,15 @@ export default function JobDetail({
 
       <div className="card">
         <div className="row spread" style={{ marginBottom: 8 }}>
-          <h2 style={{ margin: 0 }}>로그</h2>
+          <h2 style={{ margin: 0 }}>{t.jobDetail.log}</h2>
           <label className="inline-check" style={{ margin: 0 }}>
             <input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} />
-            자동 스크롤
+            {t.jobDetail.autoScroll}
           </label>
         </div>
         <div className="log" ref={logRef}>
           {lines.length === 0
-            ? "아직 출력이 없습니다."
+            ? t.jobDetail.noOutput
             : lines.map((l, i) => (
                 <div key={i} className={l.stream}>
                   {l.text}
@@ -177,33 +180,33 @@ export default function JobDetail({
 
       {job && (
         <div className="card">
-          <h2>상세</h2>
+          <h2>{t.jobDetail.details}</h2>
           <table className="kv">
             <tbody>
               <tr>
-                <td>작업 ID</td>
+                <td>{t.jobDetail.jobId}</td>
                 <td className="mono">{job.jobId}</td>
               </tr>
               <tr>
-                <td>시작 / 종료</td>
+                <td>{t.jobDetail.startedFinished}</td>
                 <td>
-                  {formatTime(job.startedAt)} → {formatTime(job.finishedAt)}
+                  {formatTime(job.startedAt, t)} → {formatTime(job.finishedAt, t)}
                 </td>
               </tr>
               <tr>
-                <td>종료 코드</td>
-                <td>{job.exitCode ?? "—"}</td>
+                <td>{t.jobDetail.exitCode}</td>
+                <td>{job.exitCode ?? t.common.dash}</td>
               </tr>
               <tr>
-                <td>결과 위치</td>
-                <td className="path">{job.outputPath ?? "—"}</td>
+                <td>{t.jobDetail.outputPath}</td>
+                <td className="path">{job.outputPath ?? t.common.dash}</td>
               </tr>
               <tr>
-                <td>로그 파일</td>
-                <td className="path">{job.logPath ?? "—"}</td>
+                <td>{t.jobDetail.logPath}</td>
+                <td className="path">{job.logPath ?? t.common.dash}</td>
               </tr>
               <tr>
-                <td>실행 인자</td>
+                <td>{t.jobDetail.args}</td>
                 <td className="path">{job.args}</td>
               </tr>
             </tbody>
