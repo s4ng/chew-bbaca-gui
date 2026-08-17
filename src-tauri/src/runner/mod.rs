@@ -163,8 +163,22 @@ pub trait ChewieRunner: Send + Sync {
     /// 앱 시작 시 조정(reconciliation)용 생존 확인 (§6.3).
     fn is_alive(&self, handle: &JobHandle) -> Result<bool>;
 
-    /// 산출물이 실제로 만들어졌는지. 죽은 작업을 `completed` 로 확정할지
-    /// `failed` 로 표시할지 가르는 유일한 근거다 (§6.3).
+    /// 고아 작업이 남긴 종료 코드. 아직 실행 중이거나 프로세스 그룹째 죽어서
+    /// 표식을 남기지 못했으면 `None` (§6.3).
+    ///
+    /// **이 값이 있으면 `output_produced()` 보다 우선한다.** 산출물 유무는 추정일
+    /// 뿐이고, 이 숫자는 프로세스 자신이 적은 사실이다.
+    fn exit_status(&self, job_id: &str) -> Result<Option<i32>>;
+
+    /// 완료된 작업의 산출물을 호스트 폴더로 회수한다. 회수한 폴더 경로를 돌려준다.
+    ///
+    /// 정상 경로는 `run()` 안에서 회수를 끝내고 `RunOutcome::collected_to` 로 알린다.
+    /// 이 메서드는 **앱이 닫힌 사이 끝난 작업**을 위한 것이다 — 그 경로에도 회수가
+    /// 없으면 작업만 `completed` 가 되고 사용자의 결과 폴더는 빈 채로 남는다.
+    fn collect_output(&self, job_id: &str, host_dest: &Path, sink: &EventSink) -> Result<String>;
+
+    /// 산출물이 실제로 만들어졌는지. `exit_status()` 가 `None` 일 때만 쓰는
+    /// **추정용 폴백**이다 (§6.3).
     ///
     /// **`spec` 이 필요한 이유:** 산출물이 가는 곳이 모듈마다 다르다. CreateSchema 는
     /// 작업 디렉터리가 아니라 스키마 저장소에 결과를 남기므로, 작업 디렉터리만 보면

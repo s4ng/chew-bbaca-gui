@@ -32,6 +32,15 @@ const PGID_MARKER: &str = "__CHEWIE_PGID__";
 /// 앱이 죽어도 쓰기 대상이 사라지지 않아야 작업이 살아남는다 (§6.3).
 const RUN_LOG: &str = "run.log";
 
+/// 작업 디렉터리 안의 종료 코드 표식. 프로세스가 스스로 남긴다.
+///
+/// 앱이 닫힌 사이 끝난 작업은 `wait` 의 반환값을 받을 사람이 없다. 그렇다고 산출물
+/// 유무로 성공을 추정하면 **중간에 죽은 작업도 완료로 확정된다** — chewBBACA 는
+/// 시작 직후 `output/results_<시각>/` 을 만들기 때문에 3초 만에 죽어도 `output` 은
+/// 비어 있지 않다(2026-08-17, AlleleCall 이 "Wrapping up" 에서 끊긴 채 완료로 확정됨).
+/// 프로세스 자신이 적어 둔 이 숫자만이 사후에 믿을 수 있는 근거다.
+const EXIT_CODE_FILE: &str = ".exit_code";
+
 /// `wsl.exe` 에 명령을 넘기는 방식. **`--` 로 바꾸지 마라.**
 ///
 /// `wsl.exe -d <distro> -- <명령>` 은 명령줄을 배포판의 **기본 셸에 한 번 더 파싱**시킨다.
@@ -46,6 +55,35 @@ const EXEC_FLAG: &str = "-e";
 /// 로그인 셸로 스크립트 하나를 실행하는 argv. `-l` 은 micromamba 활성화용이다(§8.2).
 fn login_shell_argv(script: &str) -> [&str; 4] {
     [EXEC_FLAG, "bash", "-lc", script]
+}
+
+/// 작업 하나를 띄우고 로그를 중계하는 셸 스크립트.
+///
+/// `spawn_and_stream()` 에서 떼어낸 것은 이 스크립트의 불변식 — 로그는 파일로,
+/// 종료 코드는 표식 파일로, 그리고 `wait` 이 받는 값은 chewBBACA 자신의 것 — 을
+/// WSL 없이 테스트에서 확인하기 위해서다.
+fn run_script(work: &str, command_line: &str) -> String {
+    // `tail --pid` 는 그 프로세스가 끝나면 **남은 내용을 흘린 뒤** 스스로 끝난다.
+    // 직접 kill 하면 마지막 몇 줄(요약 표, "Finished at")을 놓친다.
+    format!(
+        "set -o pipefail
+             export PYTHONUNBUFFERED=1
+             cd {work}
+             export CHEWIE_CMD={cmd}
+             export CHEWIE_RC={rc}
+             LOG={work}/{log}
+             : > \"$LOG\"
+             rm -f \"$CHEWIE_RC\"
+             setsid --wait bash -c 'echo \"{marker} $$\"; eval \"$CHEWIE_CMD\"; rc=$?; echo $rc > \"$CHEWIE_RC\"; exit $rc' >> \"$LOG\" 2>&1 &
+             CHILD=$!
+             tail -n +1 -f --pid=\"$CHILD\" \"$LOG\"
+             wait \"$CHILD\"",
+        work = sh_quote(work),
+        cmd = sh_quote(command_line),
+        rc = sh_quote(&format!("{work}/{EXIT_CODE_FILE}")),
+        marker = PGID_MARKER,
+        log = RUN_LOG,
+    )
 }
 
 pub struct WslRunner {
@@ -224,6 +262,11 @@ impl WslRunner {
     /// 쓰던 프로세스는 SIGPIPE 로 죽는다 — `setsid` 로 프로세스 그룹을 분리해도
     /// 출력 대상이 앱의 파이프면 소용이 없다(2026-08-10 에 실측으로 확인했다).
     /// 파일에 쓰게 하고 `tail` 로 중계하면, 앱이 죽어도 죽는 것은 `tail` 뿐이다.
+    ///
+    /// **종료 코드도 같은 이유로 파일에 남긴다.** `wait` 의 반환값은 앱이 살아 있을 때만
+    /// 받을 수 있고, 고아가 된 작업의 결말은 그 값 없이 판정해야 하기 때문이다
+    /// (`EXIT_CODE_FILE`). `rc=$?; ...; exit $rc` 로 되돌려 주는 것은 이 표식 기록이
+    /// setsid 자식의 종료 코드를 `echo` 의 것(항상 0)으로 덮어쓰지 않게 하기 위함이다.
     fn spawn_and_stream(&self, work: &str, argv: &[String], sink: &EventSink) -> Result<i32> {
         let command_line = argv
             .iter()
@@ -231,24 +274,7 @@ impl WslRunner {
             .collect::<Vec<_>>()
             .join(" ");
 
-        // `tail --pid` 는 그 프로세스가 끝나면 **남은 내용을 흘린 뒤** 스스로 끝난다.
-        // 직접 kill 하면 마지막 몇 줄(요약 표, "Finished at")을 놓친다.
-        let script = format!(
-            "set -o pipefail
-             export PYTHONUNBUFFERED=1
-             cd {work}
-             export CHEWIE_CMD={cmd}
-             LOG={work}/{log}
-             : > \"$LOG\"
-             setsid --wait bash -c 'echo \"{marker} $$\"; eval \"$CHEWIE_CMD\"' >> \"$LOG\" 2>&1 &
-             CHILD=$!
-             tail -n +1 -f --pid=\"$CHILD\" \"$LOG\"
-             wait \"$CHILD\"",
-            work = sh_quote(work),
-            cmd = sh_quote(&command_line),
-            marker = PGID_MARKER,
-            log = RUN_LOG,
-        );
+        let script = run_script(work, &command_line);
 
         let mut cmd = self.base();
         cmd.args(login_shell_argv(script.as_str()))
@@ -273,7 +299,7 @@ impl WslRunner {
     }
 
     /// 결과를 Windows 로 되돌린다 (§5.2 규칙 3).
-    fn collect_output(&self, work: &str, host_dest: &Path, sink: &EventSink) -> Result<String> {
+    fn copy_output_dir(&self, work: &str, host_dest: &Path, sink: &EventSink) -> Result<String> {
         std::fs::create_dir_all(host_dest)?;
         let dest_backend = self.to_backend_path(host_dest)?;
         sink(RunEvent::Notice(
@@ -568,7 +594,7 @@ impl ChewieRunner for WslRunner {
             }
             None => {
                 outcome.collected_to =
-                    Some(self.collect_output(&work, Path::new(&spec.output_dir), sink)?);
+                    Some(self.copy_output_dir(&work, Path::new(&spec.output_dir), sink)?);
             }
         }
 
@@ -602,6 +628,17 @@ impl ChewieRunner for WslRunner {
             "kill -0 -{pgid} 2>/dev/null && echo alive || echo dead"
         ))?;
         Ok(out.stdout.trim() == "alive")
+    }
+
+    fn exit_status(&self, job_id: &str) -> Result<Option<i32>> {
+        let path = format!("{}/{}", self.work_dir(job_id)?, EXIT_CODE_FILE);
+        let out = self.bash(&format!("cat {} 2>/dev/null || true", sh_quote(&path)))?;
+        Ok(out.stdout.trim().parse::<i32>().ok())
+    }
+
+    fn collect_output(&self, job_id: &str, host_dest: &Path, sink: &EventSink) -> Result<String> {
+        let work = self.work_dir(job_id)?;
+        self.copy_output_dir(&work, host_dest, sink)
     }
 
     fn output_produced(&self, job_id: &str, spec: &JobSpec) -> Result<bool> {
@@ -816,5 +853,33 @@ mod tests {
     fn login_shell_keeps_the_l_flag() {
         // `-l` 이 빠지면 micromamba 가 활성화되지 않아 chewBBACA.py 를 못 찾는다 (§8.2).
         assert!(login_shell_argv("x").contains(&"-lc"));
+    }
+
+    #[test]
+    fn run_script_records_the_exit_code_for_orphans() {
+        // 앱이 닫힌 사이 끝난 작업의 성공/실패를 가를 유일한 근거다. 이 줄이 빠지면
+        // 판정이 "산출물이 있는가" 로 되돌아가고, chewBBACA 가 시작하자마자 만드는
+        // results_<시각>/ 때문에 **중간에 죽은 작업도 완료로 확정된다.**
+        let script = run_script("/home/chewie/work/j1", "chewBBACA.py AlleleCall");
+        assert!(script.contains("echo $rc > \"$CHEWIE_RC\""));
+        assert!(script.contains("export CHEWIE_RC='/home/chewie/work/j1/.exit_code'"));
+        // 이전 실행이 남긴 값을 그대로 읽으면 시작하자마자 완료로 보인다.
+        assert!(script.contains("rm -f \"$CHEWIE_RC\""));
+    }
+
+    #[test]
+    fn run_script_still_returns_chewbbacas_own_exit_code() {
+        // 표식을 남기는 `echo` 가 setsid 자식의 마지막 명령이 되면 `wait` 은 언제나
+        // 0 을 받는다. 그러면 실패한 작업이 전부 성공으로 확정된다 — `exit $rc` 가 막는다.
+        let script = run_script("/home/chewie/work/j1", "false");
+        let child = script
+            .split_once("setsid --wait bash -c '")
+            .expect("setsid 자식 명령")
+            .1;
+        let child = child.split_once('\'').expect("자식 명령의 끝").0;
+        assert!(
+            child.trim_end().ends_with("exit $rc"),
+            "자식의 마지막 명령이 `exit $rc` 여야 한다: {child}"
+        );
     }
 }

@@ -665,21 +665,8 @@ impl JobManager {
                 continue;
             }
 
-            // 사망 — 산출물 유무로 성공/실패를 가른다.
-            let produced = spec
-                .and_then(|s| self.runner.output_produced(&job.job_id, &s).ok())
-                .unwrap_or(false);
-            if produced {
-                self.finalize(&job.job_id, JobStatus::Completed, None, None, None);
-            } else {
-                self.finalize(
-                    &job.job_id,
-                    JobStatus::Failed,
-                    None,
-                    Some("앱이 종료된 사이 프로세스가 사라졌고 결과도 없습니다"),
-                    None,
-                );
-            }
+            // 사망 — 앱이 닫힌 사이 끝났다. 결말 확정과 결과 회수는 같은 곳에서 한다.
+            self.settle_adopted(&job.job_id, spec.as_ref());
         }
 
         self.maybe_start();
@@ -734,44 +721,90 @@ impl JobManager {
                 if me.runner.is_alive(&handle).unwrap_or(false) {
                     continue;
                 }
-                let populated = spec
-                    .as_ref()
-                    .and_then(|s| me.runner.output_produced(&job_id, s).ok())
-                    .unwrap_or(false);
-                let status = if populated {
-                    JobStatus::Completed
-                } else {
-                    JobStatus::Failed
-                };
-
-                // 이어받은 작업은 `RunOutcome` 이 없다. CreateSchema 였다면 여기서
-                // 직접 등록하지 않으면 스키마가 DB 에 남지 않고, 나중에 목록이
-                // 디렉터리만 보고 복구하면서 **이름과 loci 수를 잃는다.**
-                if populated {
-                    if let Some(s) = spec.as_ref() {
-                        if s.module().produces_schema() {
-                            me.register_schema_from_disk(&job_id, s);
-                        }
-                    }
-                }
-
-                me.finalize(
-                    &job_id,
-                    status,
-                    None,
-                    if populated {
-                        None
-                    } else {
-                        Some("프로세스가 결과 없이 종료되었습니다")
-                    },
-                    None,
-                );
+                me.settle_adopted(&job_id, spec.as_ref());
                 *me.current.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 me.busy.store(false, Ordering::SeqCst);
                 me.maybe_start();
                 return;
             }
         });
+    }
+
+    /// 앱이 닫힌 사이 끝난 작업의 결말을 확정한다. 조정과 복구 감시가 함께 쓴다.
+    ///
+    /// 정상 경로에서는 `runner.run()` 이 종료 코드 판정과 결과 회수를 모두 해준다.
+    /// 고아 작업에는 그 둘이 없으므로 여기서 다시 만든다 — **회수를 빠뜨리면 작업은
+    /// `completed` 인데 사용자의 결과 폴더는 비어 있다.** 결과는 백엔드 작업
+    /// 디렉터리에 그대로 남아 있으니 실패로 보이지도 않는다(2026-08-17 실제 사례).
+    fn settle_adopted(self: &Arc<Self>, job_id: &str, spec: Option<&JobSpec>) {
+        let Some(spec) = spec else {
+            // 인자를 해석하지 못하면 산출물이 어디 있는지조차 알 수 없다.
+            self.finalize(
+                job_id,
+                JobStatus::Failed,
+                None,
+                Some("작업 인자를 해석할 수 없어 결과를 확정하지 못했습니다"),
+                None,
+            );
+            return;
+        };
+
+        // 프로세스가 남긴 종료 코드가 있으면 그것이 진실이다. 없을 때만(0.4.1 이전
+        // 버전이 시작한 작업이거나 프로세스 그룹째 죽은 경우) 산출물로 추정한다.
+        let exit_code = self.runner.exit_status(job_id).ok().flatten();
+        let succeeded = match exit_code {
+            Some(code) => code == 0,
+            None => self.runner.output_produced(job_id, spec).unwrap_or(false),
+        };
+
+        if !succeeded {
+            let message = match exit_code {
+                Some(code) => format!(
+                    "앱이 닫힌 사이 chewBBACA 가 종료 코드 {code} 로 끝났습니다. 로그를 확인하세요."
+                ),
+                None => "앱이 닫힌 사이 프로세스가 사라졌고 결과도 없습니다".to_string(),
+            };
+            self.finalize(job_id, JobStatus::Failed, exit_code, Some(&message), None);
+            return;
+        }
+
+        // 이어받은 작업은 `RunOutcome` 이 없다. CreateSchema 였다면 여기서 직접
+        // 등록하지 않으면 스키마가 DB 에 남지 않고, 나중에 목록이 디렉터리만 보고
+        // 복구하면서 **이름과 loci 수를 잃는다.**
+        let mut collected = true;
+        let landed = if spec.module().produces_schema() {
+            self.register_schema_from_disk(job_id, spec);
+            self.copy_log_to_output(job_id, &spec.output_dir)
+        } else if spec.output_dir.trim().is_empty() {
+            None
+        } else {
+            let sink = self.make_sink(job_id, spec.module());
+            let dest = std::path::Path::new(&spec.output_dir);
+            match self.runner.collect_output(job_id, dest, &sink) {
+                Ok(path) => Some(path),
+                Err(e) => {
+                    collected = false;
+                    self.log(
+                        job_id,
+                        LogStream::App,
+                        &format!("결과를 결과 폴더로 회수하지 못했습니다: {e}\n원본은 백엔드 작업 공간에 그대로 남겨 두었습니다."),
+                    );
+                    None
+                }
+            }
+        };
+
+        self.finalize(
+            job_id,
+            JobStatus::Completed,
+            exit_code.or(Some(0)),
+            None,
+            landed.as_deref(),
+        );
+        // 회수에 실패했으면 정리하지 않는다 — 그 순간 작업 공간이 유일한 사본이다.
+        if collected {
+            self.cleanup_if_configured(job_id);
+        }
     }
 
     // ------------------------------------------------------------ 조회
