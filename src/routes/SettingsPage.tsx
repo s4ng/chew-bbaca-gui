@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import DataDirField from "../components/DataDirField";
 import { formatBytes, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
 import {
   backendStatus,
@@ -299,12 +300,9 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
               <td>가상 디스크</td>
               <td>{formatBytes(disk?.vhdxBytes ?? null)}</td>
             </tr>
-            <tr>
-              <td>앱 폴더</td>
-              <td className="path">{disk?.appDir ?? "—"}</td>
-            </tr>
           </tbody>
         </table>
+        <DataDirField onChanged={() => void diskUsage().then(setDisk).catch(() => undefined)} />
         <p style={{ color: "var(--text-dim)" }}>
           임시 작업 폴더는 <strong>성공한 작업에서만</strong> 자동으로 지워집니다. 실패하거나
           취소한 작업의 폴더는 남아 있고, 중간에 멈춘 AlleleCall 은 정리되지 못한 중간 파일까지

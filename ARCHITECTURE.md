@@ -218,11 +218,40 @@ chewBBACA는 수백 개 FASTA를 읽고 loci FASTA 수천 개를 쓰므로 이 �
 ├── wsl\ext4.vhdx          # chewie-env 배포판 실체
 ├── app.db                 # SQLite
 ├── logs\{job_id}.log      # 작업 로그 (DB에는 경로만 저장)
-└── cache\rootfs-*.tar.gz  # 원격 rootfs 를 쓸 때만 생기는 다운로드 캐시 (§8.1)
+├── training\*.trn         # Prodigal training file 저장소
+├── cache\rootfs-*.tar.gz  # 원격 rootfs 를 쓸 때만 생기는 다운로드 캐시 (§8.1)
+└── location.txt           # 위치를 옮겼을 때만 존재한다 (아래)
 ```
 
 `%LOCALAPPDATA%`를 사용한다. `C:\ProgramData`·`Program Files`는 관리자 권한이 필요해
 설치 경험을 해친다.
+
+#### 데이터 폴더 옮기기 (v0.4.3~)
+
+용량의 실체는 `wsl\ext4.vhdx` 하나이고 분석을 돌릴수록 수 GB 로 자란다. C 드라이브가
+작은 기기가 흔하므로 위치를 사용자가 고를 수 있게 한다.
+
+**이 설정만은 `settings` 테이블에 둘 수 없다.** `app.db` 의 위치 자체가 이 값으로
+정해지므로, DB 를 열어야 알 수 있는 곳에 두면 닭-달걀이 된다. 그래서 기본 위치에
+포인터 파일 한 줄(`location.txt`)만 남기고 그것이 실제 루트를 가리킨다.
+
+```
+CHEWIE_APP_DIR (환경변수, 개발용) → %LOCALAPPDATA%\ChewieApp\location.txt → 기본 위치
+```
+
+- **포인터가 없는 것이 정상이다.** 기존 설치본 전부가 그 상태이고, 그때 동작은
+  이 기능이 없던 때와 완전히 같다 (`paths.rs::root_from_pointer` 의 테스트가 잡는다).
+- 고른 폴더 **안에** `ChewieApp` 을 만든다. 이름이 고정인 이유는 언인스톨 훅이
+  이 폴더를 `RMDir /r` 로 지우기 때문이다 — 훅은 지우기 직전에 경로가 이 이름으로
+  끝나는지 한 번 더 확인한다.
+- 대상은 **내장 NTFS/ReFS 드라이브**여야 한다. 이동식 드라이브를 뽑으면 배포판이
+  사라진 것처럼 보이고, exFAT 에는 sparse vhdx 를 둘 수 없다.
+- **배포판이 등록되기 전에만 바꿀 수 있다.** 등록 뒤 이동은 `--export` →
+  `--unregister` → `--import` 이 필요한데, 수 GB 를 두 번 쓰는 도중 중단되면 배포판이
+  사라진 상태로 남는다. 확인 대화상자 하나로 감당할 위험이 아니라 열지 않았다.
+- 반영은 다음 기동부터다. `AppPaths` 는 시작 시 한 번 정해져 `AppState` 와
+  `JobManager` 가 각자 복사본을 들고 있고, 위치를 바꾸는 일은 설치 전 한 번뿐이라
+  그것을 전부 잠금 뒤로 옮길 값을 하지 못한다.
 
 **WSL(`chewie-env`) 측**
 

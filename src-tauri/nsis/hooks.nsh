@@ -30,6 +30,28 @@
     ; vhdx 는 위에서 WSL 이 지운다. 여기서 남은 app.db / logs / cache 를 정리한다.
     ; 순서를 뒤집으면 배포판 등록만 남아 깨진 상태가 된다.
     SetShellVarContext current
+
+    ; 데이터 폴더를 다른 드라이브로 옮긴 사용자가 있을 수 있다 (paths.rs §5.3).
+    ; 그때 실제 폴더는 location.txt 가 가리키는 곳이고, 기본 폴더에는 그 파일만 남는다.
+    ;
+    ; **포인터가 없는 것이 정상이다** — 0.4.2 까지의 모든 설치본이 그 상태다.
+    ; 아래 블록이 통째로 건너뛰어져도 마지막 RMDir 은 반드시 돌아야 하므로,
+    ; 기본 폴더 삭제를 이 조건 안에 넣지 않는다.
+    ClearErrors
+    FileOpen $2 "$LOCALAPPDATA\ChewieApp\location.txt" r
+    ${IfNot} ${Errors}
+      FileRead $2 $3
+      FileClose $2
+      ; 앱은 줄바꿈 없이 한 줄만 쓴다. 그래도 손으로 고친 파일을 만날 수 있으므로
+      ; 마지막 9글자가 폴더 이름과 맞을 때만 지운다 — 엉뚱한 경로를 RMDir /r 하는
+      ; 사고를 막는 마지막 방어선이다 (paths.rs 의 ROOT_DIR_NAME 과 같아야 한다).
+      StrCpy $4 $3 "" -9
+      ${If} $4 == "ChewieApp"
+        DetailPrint "데이터 폴더를 지우는 중: $3"
+        RMDir /r "$3"
+      ${EndIf}
+    ${EndIf}
+
     RMDir /r "$LOCALAPPDATA\ChewieApp"
   ${EndIf}
 !macroend

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import DataDirField from "../components/DataDirField";
 import {
   envFirmwareHint,
   envInstallWsl,
@@ -389,6 +390,13 @@ function DistroGate({ onDone }: { onDone: () => Promise<void> | void }) {
       )}
 
       {error && <div className="banner error">{error}</div>}
+
+      {/*
+        설치 위치는 **여기서 고르는 것이 마지막 기회**다. `wsl --import` 로 등록하고
+        나면 가상 디스크가 그 경로에 묶여, 옮기려면 배포판을 지우고 다시 깔아야 한다.
+        그래서 [설치] 버튼 바로 위에 둔다.
+      */}
+      {!running && !done && <DataDirField />}
 
       {running || event ? (
         <div style={{ marginTop: 12 }}>

@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::api;
 use crate::db::Db;
@@ -31,7 +31,7 @@ use crate::error::{Error, Result};
 use crate::jobs::JobManager;
 use crate::mcp::{McpServer, McpStatus};
 use crate::models::{Job, JobSpec, PruneResult, SchemaInfo, WorkDirEntry};
-use crate::paths::AppPaths;
+use crate::paths::{self, AppPaths};
 use crate::runner::BackendStatus;
 use crate::schema_store::SchemaStore;
 use crate::settings::{McpSettings, Settings};
@@ -124,6 +124,19 @@ pub struct LociListInfo {
 pub struct DiskUsage {
     pub vhdx_bytes: Option<u64>,
     pub app_dir: String,
+}
+
+/// 데이터 폴더 위치 (§5.3). 온보딩 ③ 과 설정 화면이 같은 값을 본다.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataDirInfo {
+    pub current: String,
+    pub default_dir: String,
+    pub is_default: bool,
+    /// 배포판이 아직 등록되지 않았을 때만 바꿀 수 있다.
+    pub changeable: bool,
+    /// 바꿀 수 없는 이유. 버튼을 지우고 이 문구를 대신 보여준다.
+    pub reason: Option<String>,
 }
 
 // ================================================================ 환경
@@ -297,6 +310,73 @@ pub fn disk_compact(state: State<'_, AppState>) -> Result<String> {
 #[tauri::command]
 pub fn disk_usage(state: State<'_, AppState>) -> DiskUsage {
     api::disk_usage(state.inner())
+}
+
+/// 데이터 폴더가 지금 어디이고 아직 옮길 수 있는지 (§5.3).
+///
+/// `wsl --list` 를 부르므로 `(async)` 다.
+#[tauri::command(async)]
+pub fn data_dir_info(state: State<'_, AppState>) -> DataDirInfo {
+    let distro = state.settings().distro;
+    let default_dir = paths::default_root()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let current = state.paths.root.to_string_lossy().to_string();
+    let installed = crate::env::probe::distro_registered(&distro);
+
+    DataDirInfo {
+        is_default: current == default_dir,
+        changeable: !installed,
+        reason: installed.then(|| {
+            format!(
+                "전용 배포판({distro})이 이미 설치되어 있습니다. 가상 디스크는 등록된 위치에 \
+                 묶여 있어 지금은 옮길 수 없습니다."
+            )
+        }),
+        current,
+        default_dir,
+    }
+}
+
+/// 데이터 폴더 위치를 바꾼다. 실제 반영은 다음 기동부터다.
+///
+/// **배포판이 등록되기 전에만 허용한다.** 등록 뒤에는 `wsl --export` →
+/// `--unregister` → 새 위치로 `--import` 를 해야 하는데, 수 GB 를 두 번 쓰는 동안
+/// 중단되면 배포판이 사라진 상태로 남는다. 확인 UI 하나로 감당할 위험이 아니라서
+/// 이 경로는 열지 않았다 — 옮기려는 사용자는 [환경 제거] 를 거쳐야 한다.
+///
+/// 반환값은 실제로 기록한 경로다. 고른 폴더 아래에 `ChewieApp` 이 붙으므로
+/// 사용자가 고른 것과 다를 수 있고, 화면에 그대로 보여줘야 한다.
+#[tauri::command(async)]
+pub fn data_dir_set(state: State<'_, AppState>, path: String) -> Result<String> {
+    let distro = state.settings().distro;
+    if crate::env::probe::distro_registered(&distro) {
+        return Err(Error::InvalidInput(format!(
+            "전용 배포판({distro})이 이미 설치되어 있어 데이터 폴더를 옮길 수 없습니다.\n\
+             옮기려면 [설정] → [환경 제거] 로 배포판을 지운 뒤 위치를 바꾸고 다시 설치하세요. \
+             앱이 소유한 스키마도 함께 사라지므로 먼저 [스키마] 화면에서 내보내세요."
+        )));
+    }
+
+    let root = paths::check_data_root(Path::new(&path))?;
+    // 쓸 수 있는 곳인지 실제로 만들어 본 뒤에 포인터를 남긴다. 순서를 뒤집으면
+    // 다음 기동에서 만들지도 못하는 곳을 가리킨 채로 앱이 뜨지 못한다.
+    AppPaths::at(root.clone()).ensure_dirs()?;
+    paths::write_pointer(&root)?;
+    Ok(root.to_string_lossy().to_string())
+}
+
+/// 앱을 다시 시작한다. 데이터 폴더를 바꾼 뒤 새 경로로 다시 배선하는 유일한 방법이다.
+///
+/// `AppPaths` 는 시작 시 한 번 정해져 `AppState` 와 `JobManager` 가 각자 복사본을
+/// 들고 있다. 실행 중에 갈아끼우려면 그 전부를 잠금 뒤로 옮겨야 하는데, 위치를
+/// 바꾸는 일은 설치 전 한 번뿐이라 그만한 값을 하지 못한다.
+#[tauri::command]
+pub fn app_restart(app: AppHandle, state: State<'_, AppState>) {
+    // 리스너를 닫지 않고 나가면 포트가 잠깐 물려 있어 새 프로세스가 다음 포트로
+    // 밀린다 (`lib.rs` 의 종료 훅과 같은 이유).
+    state.mcp.stop();
+    tauri::process::restart(&app.env());
 }
 
 /// 지워도 되는 임시 작업 폴더 목록. `du` 가 하위 파일을 전부 훑으므로 `(async)` 다.

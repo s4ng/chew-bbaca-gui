@@ -104,7 +104,14 @@ curl 로만 확인했다. 자세한 것은 [`MCP.md`](MCP.md) §9~§10.
   *S. agalactiae* 완성 게놈 32개(`genomes\complete_genomes\complete_genomes\*.fna`),
   loci 3,127개 스키마, AlleleCall 결과 폴더 셋, `cgMLSTschema95.txt`(loci 목록 1,270).
   모듈을 검증할 때 합성 데이터를 새로 만들 필요가 없다.
-- `%LOCALAPPDATA%\ChewieApp\` 은 스모크 테스트로 이미 생성되어 있다 (정상, 앱이 재사용한다).
+- **데이터 폴더가 `D:\ChewieApp` 으로 옮겨져 있다** (2026-08-17). `%LOCALAPPDATA%\ChewieApp\`
+  에는 `location.txt` 한 줄만 남아 있고 그것이 실제 위치를 가리킨다 (§5.3).
+  `ext4.vhdx`(18.1GB)는 복사 → `wsl --unregister` → `wsl --import-in-place` 로 옮겼다 —
+  이 기기의 WSL 은 2.1.5 라 `--manage --move` 가 없다. 스키마 3개와 chewBBACA 3.5.4 는
+  이전 후 정상 확인했다.
+  **포인터를 읽는 것은 이번 패치부터다.** 그 이전 빌드(0.4.2 이하)를 이 기기에서 실행하면
+  기본 위치를 보고 빈 DB 를 새로 만든다 — 작업 이력이 사라진 것처럼 보이지만 실제 데이터는
+  `D:\ChewieApp` 에 그대로 있다.
 - git 저장소로 초기화되어 있다 (`main` 브랜치, 초기 커밋 `dad4469`).
   원격은 <https://github.com/s4ng/chew-bbaca-gui> (**공개**). `gh` 는 `s4ng` 로 인증돼 있다.
   릴리스는 **태그에 `v` 를 붙이지 않고**(`0.2.0`) 제목에만 붙인다(`v0.2.0`) — 기존 관례다.

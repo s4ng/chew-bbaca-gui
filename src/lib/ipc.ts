@@ -8,6 +8,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   BackendStatus,
+  DataDirInfo,
   DiskUsage,
   EnvReport,
   FirmwareHint,
@@ -48,6 +49,17 @@ export const envUnregister = () => invoke<void>("env_unregister");
 
 export const diskCompact = () => invoke<string>("disk_compact");
 export const diskUsage = () => invoke<DiskUsage>("disk_usage");
+/** 데이터 폴더가 지금 어디이고 아직 옮길 수 있는지. */
+export const dataDirInfo = () => invoke<DataDirInfo>("data_dir_info");
+/**
+ * 데이터 폴더 위치를 바꾼다. 반환값은 **실제로 기록된 경로**다 — 고른 폴더 아래에
+ * `ChewieApp` 이 붙으므로 사용자가 고른 것과 다르다.
+ *
+ * 반영은 다음 기동부터다. 부른 쪽이 이어서 `appRestart()` 를 부른다.
+ */
+export const dataDirSet = (path: string) => invoke<string>("data_dir_set", { path });
+/** 앱을 다시 시작한다. 돌아오지 않는다. */
+export const appRestart = () => invoke<void>("app_restart");
 export const workPrunable = () => invoke<WorkDirEntry[]>("work_prunable");
 export const workPrune = (jobIds: string[]) => invoke<PruneResult>("work_prune", { jobIds });
 

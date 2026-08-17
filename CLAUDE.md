@@ -46,13 +46,23 @@ macOS 확장 시 통째로 교체될 화면이다.
 - 기존 WSL 배포판을 읽는 것은 되지만 **수정·삭제는 절대 금지**다. 목록은 표시 전용.
 - `.wslconfig` 는 전역 설정이다. 읽지도 쓰지도 않는다. 메모리 제한이 필요하면 안내만 한다.
 - `wsl --install` 에서 `--no-distribution` 을 빼지 마라. 빼면 Ubuntu 가 함께 설치된다.
-- 앱이 소유하는 것은 `chewie-env` 배포판과 `%LOCALAPPDATA%\ChewieApp` 뿐이다.
+- 앱이 소유하는 것은 `chewie-env` 배포판과 데이터 폴더뿐이다. 데이터 폴더는 기본이
+  `%LOCALAPPDATA%\ChewieApp` 이지만 **사용자가 다른 드라이브로 옮길 수 있다** (§5.3).
+  경로를 하드코딩하지 말고 언제나 `AppPaths` 를 통한다.
 - 그 둘은 **제거할 때 정리해야 하는 것이기도 하다.** `nsis/hooks.nsh` 의 언인스톨 훅이
   체크박스가 켜졌을 때만 배포판을 unregister 하고 폴더를 지운다. 훅에서 지우는 경로를
   늘리려면 그 경로가 정말 앱 소유인지부터 확인한다.
+- 훅은 `location.txt` 를 읽어 옮겨진 폴더도 지운다. 그 폴더 이름이 항상 `ChewieApp`
+  으로 끝난다는 것이 `RMDir /r` 앞의 마지막 방어선이므로 `paths::ROOT_DIR_NAME` 을
+  바꾸면 훅도 같이 고친다 (`the_uninstall_hook_checks_this_directory_name` 이 잡는다).
 - 훅을 고쳤으면 **정의되었는지를 따로 확인한다.** `installer.nsi` 는 `!ifmacrodef` 로
   감싸 호출하므로, 매크로 이름을 틀리면 빌드는 멀쩡히 성공하고 훅만 조용히 안 돈다.
   작은 `.nsi` 에 `!include` 후 `!ifmacrodef` → `!warning` 으로 확인하면 몇 초면 된다.
+
+데이터 폴더 위치만은 `settings` 테이블에 넣을 수 없다 — `app.db` 의 위치 자체가 그
+값으로 정해지기 때문이다. 기본 위치의 `location.txt` 한 줄이 실제 루트를 가리키고,
+**파일이 없는 것이 정상**이다(기존 설치본 전부). 그 경로에서는 이 기능이 없던 때와
+동작이 완전히 같아야 하며, `paths.rs::root_from_pointer` 의 테스트가 그것을 지킨다.
 
 ### 3. 파일시스템 규칙
 

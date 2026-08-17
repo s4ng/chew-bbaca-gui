@@ -239,6 +239,16 @@ fn wsl_status() -> WslStatus {
     }
 }
 
+/// 전용 배포판이 이미 등록되어 있는지.
+///
+/// `try_distro()` 와 달리 VM 을 깨우지 않아 즉시 끝난다. "데이터 폴더를 아직
+/// 옮겨도 되는가" 처럼 화면을 그릴 때마다 물어야 하는 곳에서 쓴다.
+pub fn distro_registered(distro: &str) -> bool {
+    list_distros()
+        .iter()
+        .any(|d| d.eq_ignore_ascii_case(distro))
+}
+
 /// 사용자의 기존 배포판 목록. **표시 전용**이다 — 원칙 "사용자 환경 불가침".
 fn list_distros() -> Vec<String> {
     let mut cmd = win::command("wsl.exe");

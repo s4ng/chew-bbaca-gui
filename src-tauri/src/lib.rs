@@ -48,6 +48,13 @@ pub fn run() {
         .setup(|app| {
             let paths = AppPaths::resolve()?;
             paths.ensure_dirs()?;
+            // 데이터 폴더를 옮긴 뒤의 첫 실행이라면 기존 `app.db` 를 가져온다.
+            // **DB 를 여기서 열기 전에** 해야 한다 (`adopt_default_db` 참조).
+            // 실패해도 앱은 떠야 한다 — 잃는 것은 설정 한 줄이고, 여기서 멈추면
+            // 사용자가 할 수 있는 일이 아무것도 없다.
+            if let Err(e) = paths.adopt_default_db() {
+                eprintln!("기존 설정을 새 데이터 폴더로 가져오지 못했습니다: {e}");
+            }
 
             let db = Arc::new(Db::open(&paths.db)?);
             let settings = Settings::load(&db);
@@ -95,6 +102,9 @@ pub fn run() {
             commands::env_unregister,
             commands::disk_compact,
             commands::disk_usage,
+            commands::data_dir_info,
+            commands::data_dir_set,
+            commands::app_restart,
             commands::work_prunable,
             commands::work_prune,
             commands::jobs_submit,

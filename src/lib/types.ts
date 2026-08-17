@@ -236,6 +236,16 @@ export interface DiskUsage {
   appDir: string;
 }
 
+/** 데이터 폴더 위치 (Rust `commands::DataDirInfo` 와 1:1) */
+export interface DataDirInfo {
+  current: string;
+  defaultDir: string;
+  isDefault: boolean;
+  /** 배포판이 아직 없을 때만 true. false 면 버튼 대신 `reason` 을 보여준다. */
+  changeable: boolean;
+  reason: string | null;
+}
+
 /** 백엔드에 남아 있는 임시 작업 폴더 (Rust `models::WorkDirEntry` 와 1:1) */
 export interface WorkDirEntry {
   jobId: string;
