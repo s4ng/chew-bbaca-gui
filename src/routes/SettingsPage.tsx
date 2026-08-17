@@ -44,6 +44,17 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
   /** null = 아직 훑어보지 않음. `du` 가 수 초 걸릴 수 있어 버튼을 눌러야 센다. */
   const [prunable, setPrunable] = useState<WorkDirEntry[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  /**
+   * 디스크 카드의 결과는 **카드 안에서** 보여준다.
+   *
+   * 페이지 최상단 배너로 보내면 안 된다 — 디스크 카드는 세 번째 카드라 버튼을 누르는
+   * 시점에 배너가 스크롤 밖에 있고, 사용자에게는 눌러도 아무 일이 없는 것으로 보인다.
+   * 실제로 그렇게 신고가 들어왔다.
+   */
+  const [diskMsg, setDiskMsg] = useState<string | null>(null);
+  const [diskError, setDiskError] = useState<string | null>(null);
+  /** 도는 동안 버튼 라벨을 바꾼다. `disk_compact` 는 배포판 종료를 포함해 수 초 걸린다. */
+  const [diskAction, setDiskAction] = useState<"scan" | "prune" | "compact" | null>(null);
 
   useEffect(() => {
     void settingsGet()
@@ -142,17 +153,24 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
 
   const loadPrunable = async () => {
     setBusy(true);
-    setMessage(null);
-    setError(null);
+    setDiskAction("scan");
+    setDiskMsg(null);
+    setDiskError(null);
     try {
       const list = await workPrunable();
       setPrunable(list);
       // 유일한 사본일 수 있는 것은 사용자가 직접 켜야 지워진다.
       setPicked(new Set(list.filter((e) => !isOnlyCopy(e)).map((e) => e.jobId)));
-      if (list.length === 0) setMessage("정리할 임시 폴더가 없습니다.");
+      const total = list.reduce((sum, e) => sum + e.bytes, 0);
+      setDiskMsg(
+        list.length === 0
+          ? "지울 임시 폴더가 없습니다. 성공한 작업은 이미 자동으로 정리되었습니다."
+          : `임시 폴더 ${list.length}개, 합계 ${formatBytes(total)} 를 찾았습니다. 지울 것을 고르세요.`,
+      );
     } catch (e) {
-      setError(asAppError(e).message);
+      setDiskError(asAppError(e).message);
     } finally {
+      setDiskAction(null);
       setBusy(false);
     }
   };
@@ -172,10 +190,12 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
     );
     if (!ok) return;
     setBusy(true);
-    setError(null);
+    setDiskAction("prune");
+    setDiskMsg(null);
+    setDiskError(null);
     try {
       const result = await workPrune(targets.map((e) => e.jobId));
-      setMessage(
+      setDiskMsg(
         `임시 폴더 ${result.removed}개를 지워 ${formatBytes(result.freedBytes)} 를 비웠습니다. ` +
           "Windows 여유 공간을 되찾으려면 이어서 [디스크 정리] 를 누르세요.",
       );
@@ -183,22 +203,40 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       setPicked(new Set());
       setDisk(await diskUsage());
     } catch (e) {
-      setError(asAppError(e).message);
+      setDiskError(asAppError(e).message);
     } finally {
+      setDiskAction(null);
       setBusy(false);
     }
   };
 
+  /**
+   * sparse 전환은 **파일을 즉시 줄이지 않는다.** 앞으로 배포판이 반납하는 블록을
+   * Windows 가 회수할 수 있게 표시하는 것이라, 대부분의 경우 방금 누른 직후의
+   * 크기는 그대로다. 그 사실을 말해주지 않으면 "정리했다는데 숫자가 그대로" 가 된다.
+   */
   const compact = async () => {
     setBusy(true);
-    setMessage(null);
-    setError(null);
+    setDiskAction("compact");
+    setDiskMsg(null);
+    setDiskError(null);
+    const before = disk?.vhdxBytes ?? null;
     try {
-      setMessage(await diskCompact());
-      setDisk(await diskUsage());
+      const note = await diskCompact();
+      const next = await diskUsage();
+      setDisk(next);
+      const after = next.vhdxBytes ?? null;
+      const freed = before != null && after != null ? before - after : null;
+      setDiskMsg(
+        freed != null && freed > 0
+          ? `${note} 지금 ${formatBytes(freed)} 가 줄어 ${formatBytes(after)} 입니다.`
+          : `${note} 파일 크기는 아직 ${formatBytes(after)} 그대로입니다 — sparse 는 지연 반납이라, ` +
+            "배포판이 블록을 반납하는 만큼 앞으로 줄어듭니다.",
+      );
     } catch (e) {
-      setError(asAppError(e).message);
+      setDiskError(asAppError(e).message);
     } finally {
+      setDiskAction(null);
       setBusy(false);
     }
   };
@@ -311,12 +349,24 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
         </p>
         <div className="row" style={{ marginTop: 10 }}>
           <button onClick={() => void loadPrunable()} disabled={busy}>
-            임시 폴더 훑어보기
+            {diskAction === "scan" ? "훑어보는 중..." : "임시 폴더 훑어보기"}
           </button>
           <button onClick={() => void compact()} disabled={busy}>
-            디스크 정리
+            {diskAction === "compact" ? "정리하는 중..." : "디스크 정리"}
           </button>
         </div>
+
+        {/* 결과는 누른 버튼 바로 아래에 남는다 — 페이지 최상단 배너는 여기서 안 보인다. */}
+        {diskError && (
+          <div className="banner error" style={{ marginTop: 10 }}>
+            {diskError}
+          </div>
+        )}
+        {diskMsg && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            {diskMsg}
+          </div>
+        )}
 
         {prunable != null && prunable.length > 0 && (
           <>
@@ -356,11 +406,13 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
               disabled={busy || picked.size === 0}
               style={{ marginTop: 10 }}
             >
-              선택한 {picked.size}개 지우기 (
-              {formatBytes(
-                prunable.filter((e) => picked.has(e.jobId)).reduce((sum, e) => sum + e.bytes, 0),
-              )}
-              )
+              {diskAction === "prune"
+                ? "지우는 중..."
+                : `선택한 ${picked.size}개 지우기 (${formatBytes(
+                    prunable
+                      .filter((e) => picked.has(e.jobId))
+                      .reduce((sum, e) => sum + e.bytes, 0),
+                  )})`}
             </button>
           </>
         )}

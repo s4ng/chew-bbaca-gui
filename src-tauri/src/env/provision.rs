@@ -297,7 +297,10 @@ impl Provisioner {
             .args(["--manage", self.distro.as_str(), "--set-sparse", "true"]);
         let out = win::capture(&mut cmd)?;
         if out.ok() {
-            return Ok("가상 디스크를 sparse 모드로 전환했습니다. 여유 공간이 반환됩니다.".into());
+            // **"여유 공간이 반환됩니다" 라고 단정하지 않는다.** sparse 는 지연 반납이라
+            // 누른 직후의 파일 크기는 대개 그대로이고, 그렇게 쓰면 사용자는 정리가
+            // 실패했다고 읽는다. 실제로 얼마가 줄었는지는 호출부가 전후를 비교해 붙인다.
+            return Ok("가상 디스크를 sparse 모드로 전환했습니다.".into());
         }
         Err(Error::Other(format!(
             "디스크 정리에 실패했습니다. WSL 버전이 --manage 를 지원하지 않을 수 있습니다.\n{}",
