@@ -95,6 +95,8 @@ pub fn run() {
             commands::env_unregister,
             commands::disk_compact,
             commands::disk_usage,
+            commands::work_prunable,
+            commands::work_prune,
             commands::jobs_submit,
             commands::jobs_list,
             commands::jobs_get,

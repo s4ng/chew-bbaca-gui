@@ -219,4 +219,12 @@ pub trait ChewieRunner: Send + Sync {
 
     /// 완료된 작업의 임시 공간을 비운다.
     fn cleanup_work(&self, job_id: &str) -> Result<()>;
+
+    /// 작업 공간에 남아 있는 디렉터리와 그 크기(바이트). `(job_id, bytes)` 목록이다.
+    ///
+    /// 정리는 성공한 작업에서만 자동으로 돌기 때문에, **실패하거나 취소된 작업의
+    /// 잔해는 계속 쌓인다.** AlleleCall 이 중간에 죽으면 `results_<시각>/temp/` 가
+    /// 통째로 남아 수십 GB 가 되기도 한다. 무엇을 지울지 사용자에게 보여주려면
+    /// 크기를 먼저 알아야 한다.
+    fn work_dir_usage(&self) -> Result<Vec<(String, u64)>>;
 }

@@ -236,6 +236,22 @@ export interface DiskUsage {
   appDir: string;
 }
 
+/** 백엔드에 남아 있는 임시 작업 폴더 (Rust `models::WorkDirEntry` 와 1:1) */
+export interface WorkDirEntry {
+  jobId: string;
+  module: Module;
+  status: JobStatus;
+  bytes: number;
+  /** 결과를 회수해 둔 Windows 폴더. null 이면 백엔드 쪽이 유일한 사본일 수 있다. */
+  outputPath: string | null;
+}
+
+/** 임시 폴더 정리 결과 (Rust `models::PruneResult` 와 1:1) */
+export interface PruneResult {
+  removed: number;
+  freedBytes: number;
+}
+
 export interface InputDirInfo {
   path: string;
   totalFiles: number;

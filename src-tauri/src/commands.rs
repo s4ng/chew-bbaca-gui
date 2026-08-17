@@ -30,7 +30,7 @@ use crate::env::{DownloadProgress, EnvReport, Provisioner, RootfsOrigin};
 use crate::error::{Error, Result};
 use crate::jobs::JobManager;
 use crate::mcp::{McpServer, McpStatus};
-use crate::models::{Job, JobSpec, SchemaInfo};
+use crate::models::{Job, JobSpec, PruneResult, SchemaInfo, WorkDirEntry};
 use crate::paths::AppPaths;
 use crate::runner::BackendStatus;
 use crate::schema_store::SchemaStore;
@@ -297,6 +297,18 @@ pub fn disk_compact(state: State<'_, AppState>) -> Result<String> {
 #[tauri::command]
 pub fn disk_usage(state: State<'_, AppState>) -> DiskUsage {
     api::disk_usage(state.inner())
+}
+
+/// 지워도 되는 임시 작업 폴더 목록. `du` 가 하위 파일을 전부 훑으므로 `(async)` 다.
+#[tauri::command(async)]
+pub fn work_prunable(state: State<'_, AppState>) -> Result<Vec<WorkDirEntry>> {
+    api::work_prunable(state.inner())
+}
+
+/// 임시 작업 폴더를 지운다. **되돌릴 수 없으므로 UI 가 먼저 확인을 받는다.**
+#[tauri::command(async)]
+pub fn work_prune(state: State<'_, AppState>, job_ids: Vec<String>) -> Result<PruneResult> {
+    api::work_prune(state.inner(), &job_ids)
 }
 
 // ================================================================ 작업

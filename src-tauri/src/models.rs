@@ -289,6 +289,27 @@ pub struct Job {
     pub progress: Option<f32>,
 }
 
+/// 백엔드 작업 공간에 남아 있는 한 작업의 임시 폴더. 정리 화면이 그대로 표시한다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkDirEntry {
+    pub job_id: String,
+    pub module: Module,
+    pub status: JobStatus,
+    pub bytes: u64,
+    /// 이 작업이 결과를 회수해 둔 Windows 폴더. 지워도 되는지 판단할 근거라
+    /// 목록에 함께 보여준다 — 비어 있으면 백엔드 쪽이 유일한 사본일 수 있다.
+    pub output_path: Option<String>,
+}
+
+/// 정리 결과. 실제로 지운 것만 센다.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PruneResult {
+    pub removed: usize,
+    pub freed_bytes: u64,
+}
+
 // ---------------------------------------------------------------- 스키마
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

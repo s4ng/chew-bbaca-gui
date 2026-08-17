@@ -20,8 +20,8 @@ use uuid::Uuid;
 use crate::db::Db;
 use crate::error::{Error, Result};
 use crate::models::{
-    Job, JobSpec, JobStatus, LogEvent, LogStream, Module, ModuleParams, ProgressEvent, SchemaInfo,
-    StateEvent, EVENT_LOG, EVENT_PROGRESS, EVENT_STATE,
+    Job, JobSpec, JobStatus, LogEvent, LogStream, Module, ModuleParams, ProgressEvent, PruneResult,
+    SchemaInfo, StateEvent, WorkDirEntry, EVENT_LOG, EVENT_PROGRESS, EVENT_STATE,
 };
 use crate::paths::{validate_host_path, AppPaths};
 use crate::runner::progress::ProgressParser;
@@ -805,6 +805,81 @@ impl JobManager {
         if collected {
             self.cleanup_if_configured(job_id);
         }
+    }
+
+    // ------------------------------------------------------------ 작업 공간 정리
+
+    /// 지워도 되는 임시 작업 폴더 목록. 큰 것부터 준다.
+    ///
+    /// 자동 정리는 **성공한 작업에서만** 돈다(`cleanup_if_configured`). 실패·취소된
+    /// 작업의 폴더는 그래서 계속 쌓이는데, AlleleCall 이 중간에 죽으면 chewBBACA 가
+    /// 지우지 못한 `temp/` 가 통째로 남아 가장 큰 잔해가 된다.
+    ///
+    /// 두 가지를 제외한다.
+    /// * 실행 중·대기 중인 작업 — 돌고 있는 작업의 발밑을 지우는 셈이다.
+    /// * **DB 가 모르는 폴더** — 무엇인지 모르는 것은 지우지 않는다. 이 프로세스가
+    ///   시작하지 않은 작업이 아직 돌고 있을 수도 있다.
+    pub fn prunable_work(&self) -> Result<Vec<WorkDirEntry>> {
+        let current = self
+            .current
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|h| h.job_id.clone());
+
+        let mut out = Vec::new();
+        for (job_id, bytes) in self.runner.work_dir_usage()? {
+            if current.as_deref() == Some(job_id.as_str()) {
+                continue;
+            }
+            let Some(job) = self.db.get_job(&job_id)? else {
+                continue;
+            };
+            if matches!(job.status, JobStatus::Running | JobStatus::Queued) {
+                continue;
+            }
+            out.push(WorkDirEntry {
+                job_id,
+                module: job.module,
+                status: job.status,
+                bytes,
+                output_path: job.output_path,
+            });
+        }
+        out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        Ok(out)
+    }
+
+    /// 지정한 작업들의 임시 폴더를 지운다.
+    ///
+    /// **호출자가 준 목록을 그대로 믿지 않는다.** 화면이 목록을 받은 뒤 작업이 하나
+    /// 시작됐을 수 있으므로, 지우기 직전에 `prunable_work()` 로 다시 걸러 교집합만
+    /// 지운다. 되돌릴 수 없는 조작에서 확인 시점과 실행 시점의 간극을 메우는 것이다.
+    pub fn prune_work(&self, job_ids: &[String]) -> Result<PruneResult> {
+        let allowed: std::collections::HashMap<String, u64> = self
+            .prunable_work()?
+            .into_iter()
+            .map(|e| (e.job_id, e.bytes))
+            .collect();
+
+        let mut removed = 0;
+        let mut freed_bytes = 0;
+        for job_id in job_ids {
+            let Some(bytes) = allowed.get(job_id) else {
+                continue;
+            };
+            match self.runner.cleanup_work(job_id) {
+                Ok(()) => {
+                    removed += 1;
+                    freed_bytes += bytes;
+                }
+                Err(e) => self.log(job_id, LogStream::App, &format!("임시 공간 정리 실패: {e}")),
+            }
+        }
+        Ok(PruneResult {
+            removed,
+            freed_bytes,
+        })
     }
 
     // ------------------------------------------------------------ 조회

@@ -21,12 +21,14 @@ import type {
   ProgressEvent,
   ProfilesInfo,
   ProvisionEvent,
+  PruneResult,
   RootfsOrigin,
   SchemaInfo,
   Settings,
   StateEvent,
   TrainingCreated,
   TrainingFile,
+  WorkDirEntry,
 } from "./types";
 
 // ---------------------------------------------------------------- 환경
@@ -46,6 +48,8 @@ export const envUnregister = () => invoke<void>("env_unregister");
 
 export const diskCompact = () => invoke<string>("disk_compact");
 export const diskUsage = () => invoke<DiskUsage>("disk_usage");
+export const workPrunable = () => invoke<WorkDirEntry[]>("work_prunable");
+export const workPrune = (jobIds: string[]) => invoke<PruneResult>("work_prune", { jobIds });
 
 // ---------------------------------------------------------------- 작업
 

@@ -57,6 +57,28 @@ fn login_shell_argv(script: &str) -> [&str; 4] {
     [EXEC_FLAG, "bash", "-lc", script]
 }
 
+/// `du -sb {root}/*/` 의 출력을 `(job_id, bytes)` 로 바꾼다.
+///
+/// 한 줄은 `바이트<TAB>/home/chewie/work/<job_id>/` 이고 **경로 끝에 `/` 가 붙는다**
+/// (2026-08-17 배포판에서 실측). 알아볼 수 없는 줄은 조용히 버린다 — 정리 목록이
+/// 한 줄 때문에 통째로 실패하면 사용자는 디스크를 비울 방법을 잃는다.
+fn parse_du_output(stdout: &str) -> Vec<(String, u64)> {
+    let mut entries = Vec::new();
+    for line in stdout.lines() {
+        let Some((bytes, path)) = line.split_once('\t') else {
+            continue;
+        };
+        let Ok(bytes) = bytes.trim().parse::<u64>() else {
+            continue;
+        };
+        let name = path.trim().trim_end_matches('/').rsplit('/').next();
+        if let Some(name) = name.filter(|n| !n.is_empty()) {
+            entries.push((name.to_string(), bytes));
+        }
+    }
+    entries
+}
+
 /// 작업 하나를 띄우고 로그를 중계하는 셸 스크립트.
 ///
 /// `spawn_and_stream()` 에서 떼어낸 것은 이 스크립트의 불변식 — 로그는 파일로,
@@ -159,6 +181,10 @@ impl WslRunner {
 
     fn schema_root(&self) -> Result<String> {
         Ok(format!("{}/schemas", self.home()?))
+    }
+
+    fn work_root(&self) -> Result<String> {
+        Ok(format!("{}/work", self.home()?))
     }
 
     /// 입력을 ext4 로 복사한다 (§5.2 규칙 1).
@@ -745,6 +771,18 @@ impl ChewieRunner for WslRunner {
         Ok(())
     }
 
+    fn work_dir_usage(&self) -> Result<Vec<(String, u64)>> {
+        let root = self.work_root()?;
+        // `du -sb` 는 하위 파일을 전부 stat 한다. 수십 GB 짜리 temp 가 남아 있으면
+        // 수 초 걸릴 수 있으므로 호출부(`work_prunable`)를 async 명령으로 둔다.
+        let out = self.bash(&format!(
+            "mkdir -p {r} && du -sb {r}/*/ 2>/dev/null || true",
+            r = sh_quote(&root)
+        ))?;
+
+        Ok(parse_du_output(&out.stdout))
+    }
+
     fn create_training_file(&self, host_genome: &Path, host_output: &Path) -> Result<()> {
         validate_host_path(host_genome)?;
         validate_host_path(host_output)?;
@@ -853,6 +891,29 @@ mod tests {
     fn login_shell_keeps_the_l_flag() {
         // `-l` 이 빠지면 micromamba 가 활성화되지 않아 chewBBACA.py 를 못 찾는다 (§8.2).
         assert!(login_shell_argv("x").contains(&"-lc"));
+    }
+
+    #[test]
+    fn parses_real_du_output() {
+        // 2026-08-17 chewie-env 에서 실제로 받은 두 줄. 탭 구분에 경로 끝의 `/` 까지
+        // 그대로다 — 추측으로 쓰면 job_id 가 빈 문자열이 되어 아무것도 못 지운다.
+        let out = "9192\t/home/chewie/work/0f1e2d3c-0000-0000-0000-000000000000/\n\
+                   3016384\t/home/chewie/work/a8025480-1235-4065-86c1-7506c848e412/\n";
+        assert_eq!(
+            parse_du_output(out),
+            vec![
+                ("0f1e2d3c-0000-0000-0000-000000000000".to_string(), 9192),
+                ("a8025480-1235-4065-86c1-7506c848e412".to_string(), 3016384),
+            ]
+        );
+    }
+
+    #[test]
+    fn empty_work_root_yields_nothing() {
+        // 작업 공간이 비면 글로브가 확장되지 않아 du 가 stderr 로만 떠든다 (실측:
+        // stdout 0줄). 여기서 빈 목록이 나와야 [훑어보기] 가 조용히 성공한다.
+        assert!(parse_du_output("").is_empty());
+        assert!(parse_du_output("du: cannot access ...\n").is_empty());
     }
 
     #[test]

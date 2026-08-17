@@ -15,7 +15,7 @@ use crate::commands::{AppState, DiskUsage};
 use crate::env::EnvReport;
 use crate::error::{Error, Result};
 use crate::fasta::GenomeScan;
-use crate::models::{Job, JobSpec, Module, SchemaInfo};
+use crate::models::{Job, JobSpec, Module, PruneResult, SchemaInfo, WorkDirEntry};
 use crate::runner::BackendStatus;
 use crate::training_store::{TrainingCreated, TrainingFile};
 
@@ -61,6 +61,17 @@ pub fn jobs_cancel(state: &AppState, job_id: &str) -> Result<()> {
 
 pub fn jobs_log(state: &AppState, job_id: &str) -> Result<String> {
     state.manager.read_log(job_id)
+}
+
+/// 지워도 되는 임시 작업 폴더 목록. 읽기만 한다.
+pub fn work_prunable(state: &AppState) -> Result<Vec<WorkDirEntry>> {
+    state.manager.prunable_work()
+}
+
+/// **되돌릴 수 없다.** MCP 에는 노출하지 않는다 (`doc/MCP.md` §4) — 확인을 받을
+/// UI 가 없는 채널에서 남의 결과를 지울 수 있으면 안 된다.
+pub fn work_prune(state: &AppState, job_ids: &[String]) -> Result<PruneResult> {
+    state.manager.prune_work(job_ids)
 }
 
 // ================================================================ 스키마

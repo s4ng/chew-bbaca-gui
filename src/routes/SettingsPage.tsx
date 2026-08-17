@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { formatBytes } from "../lib/format";
+import { formatBytes, MODULE_LABEL, STATUS_LABEL } from "../lib/format";
 import {
   backendStatus,
   diskCompact,
@@ -12,6 +12,8 @@ import {
   mcpStatus,
   settingsGet,
   settingsSet,
+  workPrunable,
+  workPrune,
 } from "../lib/ipc";
 import {
   asAppError,
@@ -19,7 +21,12 @@ import {
   type DiskUsage,
   type McpStatus,
   type Settings,
+  type WorkDirEntry,
 } from "../lib/types";
+
+/// 결과를 회수하지 않은 채 완료된 작업. 백엔드 폴더가 **유일한 사본**일 수 있으므로
+/// 기본으로 선택하지 않는다 — 0.4.2 이전에 복구된 작업이 정확히 이 상태다.
+const isOnlyCopy = (e: WorkDirEntry) => e.status === "completed" && e.outputPath == null;
 
 export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Promise<void> | void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
@@ -33,6 +40,9 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /** null = 아직 훑어보지 않음. `du` 가 수 초 걸릴 수 있어 버튼을 눌러야 센다. */
+  const [prunable, setPrunable] = useState<WorkDirEntry[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     void settingsGet()
@@ -126,6 +136,55 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
       setMessage("저장했습니다.");
     } catch (e) {
       setError(asAppError(e).message);
+    }
+  };
+
+  const loadPrunable = async () => {
+    setBusy(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const list = await workPrunable();
+      setPrunable(list);
+      // 유일한 사본일 수 있는 것은 사용자가 직접 켜야 지워진다.
+      setPicked(new Set(list.filter((e) => !isOnlyCopy(e)).map((e) => e.jobId)));
+      if (list.length === 0) setMessage("정리할 임시 폴더가 없습니다.");
+    } catch (e) {
+      setError(asAppError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const prune = async () => {
+    const targets = (prunable ?? []).filter((e) => picked.has(e.jobId));
+    if (targets.length === 0) return;
+    const risky = targets.filter(isOnlyCopy).length;
+    const ok = window.confirm(
+      `임시 작업 폴더 ${targets.length}개를 지웁니다 (${formatBytes(
+        targets.reduce((sum, e) => sum + e.bytes, 0),
+      )}).\n` +
+        (risky > 0
+          ? `이 중 ${risky}개는 결과를 회수하지 않은 완료 작업입니다 — 백엔드의 이 폴더가 유일한 사본일 수 있습니다.\n`
+          : "") +
+        "Windows 결과 폴더는 건드리지 않습니다.\n되돌릴 수 없습니다. 계속할까요?",
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await workPrune(targets.map((e) => e.jobId));
+      setMessage(
+        `임시 폴더 ${result.removed}개를 지워 ${formatBytes(result.freedBytes)} 를 비웠습니다. ` +
+          "Windows 여유 공간을 되찾으려면 이어서 [디스크 정리] 를 누르세요.",
+      );
+      setPrunable(await workPrunable().catch(() => []));
+      setPicked(new Set());
+      setDisk(await diskUsage());
+    } catch (e) {
+      setError(asAppError(e).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -246,9 +305,67 @@ export default function SettingsPage({ onEnvChanged }: { onEnvChanged: () => Pro
             </tr>
           </tbody>
         </table>
-        <button onClick={() => void compact()} disabled={busy} style={{ marginTop: 10 }}>
-          디스크 정리
-        </button>
+        <p style={{ color: "var(--text-dim)" }}>
+          임시 작업 폴더는 <strong>성공한 작업에서만</strong> 자동으로 지워집니다. 실패하거나
+          취소한 작업의 폴더는 남아 있고, 중간에 멈춘 AlleleCall 은 정리되지 못한 중간 파일까지
+          안고 있어 가장 큽니다. 먼저 비우고 나서 [디스크 정리] 를 눌러야 Windows 여유 공간이
+          실제로 돌아옵니다.
+        </p>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button onClick={() => void loadPrunable()} disabled={busy}>
+            임시 폴더 훑어보기
+          </button>
+          <button onClick={() => void compact()} disabled={busy}>
+            디스크 정리
+          </button>
+        </div>
+
+        {prunable != null && prunable.length > 0 && (
+          <>
+            <table className="kv" style={{ marginTop: 12 }}>
+              <tbody>
+                {prunable.map((e) => (
+                  <tr key={e.jobId}>
+                    <td>
+                      <label className="inline-check" style={{ margin: 0 }}>
+                        <input
+                          type="checkbox"
+                          checked={picked.has(e.jobId)}
+                          onChange={(ev) => {
+                            const next = new Set(picked);
+                            if (ev.target.checked) next.add(e.jobId);
+                            else next.delete(e.jobId);
+                            setPicked(next);
+                          }}
+                        />
+                        {MODULE_LABEL[e.module]}{" "}
+                        <span className={`pill ${e.status}`}>{STATUS_LABEL[e.status]}</span>
+                      </label>
+                      {isOnlyCopy(e) && (
+                        <div style={{ color: "var(--warn)", fontSize: "0.9em" }}>
+                          결과를 회수하지 않은 작업입니다 — 이 폴더가 유일한 사본일 수 있습니다.
+                        </div>
+                      )}
+                    </td>
+                    <td>{formatBytes(e.bytes)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button
+              className="danger"
+              onClick={() => void prune()}
+              disabled={busy || picked.size === 0}
+              style={{ marginTop: 10 }}
+            >
+              선택한 {picked.size}개 지우기 (
+              {formatBytes(
+                prunable.filter((e) => picked.has(e.jobId)).reduce((sum, e) => sum + e.bytes, 0),
+              )}
+              )
+            </button>
+          </>
+        )}
       </div>
 
       <div className="card">
