@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { envProbe, guideOpen } from "./lib/ipc";
@@ -34,6 +35,11 @@ export default function App() {
   const [view, setView] = useState<View>("jobs");
   /** 문서 열기가 실패하면 조용히 넘어가지 않는다 — 아무 반응이 없으면 원인을 알 수 없다. */
   const [linkError, setLinkError] = useState<string | null>(null);
+  /**
+   * 앱 버전. `tauri.conf.json` 의 값을 그대로 읽으므로 인스톨러 파일명과 언제나
+   * 같다 — 사용자가 "어느 버전을 쓰고 있는지" 를 물어올 때 이것이 답이어야 한다.
+   */
+  const [version, setVersion] = useState<string | null>(null);
 
   const recheck = useCallback(async () => {
     setChecking(true);
@@ -50,6 +56,12 @@ export default function App() {
   useEffect(() => {
     void recheck();
   }, [recheck]);
+
+  useEffect(() => {
+    void getVersion()
+      .then(setVersion)
+      .catch(() => setVersion(null));
+  }, []);
 
   // 첫 판정 전에는 아무것도 묻지 않는다. 정상 환경이면 이 화면은 한순간만 보인다.
   if (checking && !report && !probeError) {
@@ -121,6 +133,8 @@ export default function App() {
           <div className="distro">
             배포판 <code>{report.distro}</code>
           </div>
+          {/* 버그 신고를 받을 때 가장 먼저 물어보는 값이라 항상 보이는 자리에 둔다. */}
+          {version && <div className="app-version">버전 {version}</div>}
         </div>
       </nav>
 

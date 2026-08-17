@@ -600,6 +600,16 @@ table.kv td:first-child {
   margin-bottom: 0;
 }
 
+/*
+ * 앱 버전. 사이드바 맨 아래 줄이다. 늘 보이지만 시선을 끌면 안 되는 값이라
+ * 배포판 줄보다 한 단계 더 흐리게 둔다.
+ */
+.sidebar-footer .app-version {
+  font-size: 10.5px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 사이드바 링크가 실패했을 때. 좁은 폭이라 줄바꿈을 허용한다. */
 .sidebar-footer .link-error {
   color: var(--err);
